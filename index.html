@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CRAPAY - Fast payments anytime, anywhere.</title>
+  <link rel="icon" href="./public/logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./src/style.css">
+  <script src="https://kit.fontawesome.com/36cdc549b2.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  <script src="https://unpkg.com/@zxing/library@latest"></script>
+</head>
+
+<body>
+
+  <div class="glow-bg"></div>
+  <div class="glow-bg2"></div>
+
+  <!-- ── Sidebar ────────────────────────────────────────────── -->
+  <div class="sidebar">
+    <div class="logo">CRA<em>PAY</em></div>
+    <div class="sidebar-net">
+      <div class="net-dot"></div>
+      <span>Arc Testnet</span>
+    </div>
+
+    <div class="nav-section">Main</div>
+    <div class="nav-item active" onclick="nav('home')" title="Dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="7" height="7" rx="1" />
+        <rect x="14" y="3" width="7" height="7" rx="1" />
+        <rect x="3" y="14" width="7" height="7" rx="1" />
+        <rect x="14" y="14" width="7" height="7" rx="1" />
+      </svg>
+      <span>Dashboard</span>
+    </div>
+    <div class="nav-item" onclick="nav('send')" title="Send">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="22" y1="2" x2="11" y2="13" />
+        <polygon points="22 2 15 22 11 13 2 9 22 2" />
+      </svg>
+      <span>Send Payment</span>
+    </div>
+    <div class="nav-item" onclick="nav('qrpay')" title="QR Payment">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="7" height="7" />
+        <rect x="14" y="3" width="7" height="7" />
+        <rect x="3" y="14" width="7" height="7" />
+        <path d="M14 14h3v3m0 4h4v-4m-4 0v-3h4" />
+      </svg>
+      <span>QR Payment</span>
+    </div>
+    <div class="nav-item" onclick="nav('scanqr')" title="Scan QR">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
+        <rect x="7" y="7" width="10" height="10" rx="1" />
+      </svg>
+      <span>Scan QR</span>
+    </div>
+    <div class="nav-item" onclick="nav('multisend')" title="Multi-send">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+      <span>Multi-send</span>
+    </div>
+    <div class="nav-item" onclick="nav('split')" title="Split Bill">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="16" />
+        <line x1="8" y1="12" x2="16" y2="12" />
+      </svg>
+      <span>Split Bill</span>
+    </div>
+
+    <div class="nav-section">Tools</div>
+    <div class="nav-item" onclick="nav('paylink')" title="Payment Link">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+      </svg>
+      <span>Payment Link</span>
+    </div>
+    <div class="nav-item" onclick="nav('schedule')" title="Scheduled">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="4" width="18" height="18" rx="2" />
+        <line x1="16" y1="2" x2="16" y2="6" />
+        <line x1="8" y1="2" x2="8" y2="6" />
+        <line x1="3" y1="10" x2="21" y2="10" />
+        <circle cx="12" cy="16" r="2" />
+      </svg>
+      <span>Scheduled</span>
+    </div>
+    <div class="nav-item" onclick="nav('contacts')" title="Contacts">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+      <span>Contacts</span>
+    </div>
+    <div class="nav-section">Insights</div>
+    <div class="nav-item" onclick="nav('analytics')" title="Analytics">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="18" y1="20" x2="18" y2="10" />
+        <line x1="12" y1="20" x2="12" y2="4" />
+        <line x1="6" y1="20" x2="6" y2="14" />
+      </svg>
+      <span>Analytics</span>
+    </div>
+    <div class="nav-item" onclick="nav('history')" title="History">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="12 6 12 12 16 14" />
+      </svg>
+      <span>History</span>
+    </div>
+    <div class="nav-item" onclick="nav('alerts')" title="Alerts">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+      </svg>
+      <span>Price Alerts</span>
+    </div>
+
+    <div class="sidebar-footer">Build on <a href="https://arc.io" target="_blank">Arc Testnet</a><br />© 2026 CRAPAY
+    </div>
+  </div>
+
+  <!-- ── Main ───────────────────────────────────────────────── -->
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-left">
+        <!-- Hamburger: chỉ hiện mobile -->
+        <button class="hamburger-btn" id="hamburger-btn" onclick="toggleDrawer()" aria-label="Menu">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+        <!-- Logo mobile (thay page-title trên mobile) -->
+        <div class="mobile-logo">CRA<em>PAY</em></div>
+        <div class="page-title" id="page-title">Dashboard</div>
+      </div>
+      <div class="topbar-right">
+        <div class="balance-pill" id="balance-display" style="display:none">...</div>
+        <div class="wallet-chip" id="wallet-btn" onclick="handleWalletClick()">
+          <div class="dot disconnected" id="wallet-dot"></div>
+          <span id="wallet-label">Connect Wallet</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- ══════════════ HOME ══════════════ -->
+      <div class="page active" id="page-home">
+        <div class="stat-grid">
+          <div class="stat-card purple">
+            <div class="stat-label">USDC Balance</div>
+            <div class="stat-val purple" id="home-usdc">—</div>
+            <div class="stat-sub">Arc Testnet</div>
+          </div>
+          <div class="stat-card teal">
+            <div class="stat-label">EURC Balance</div>
+            <div class="stat-val teal" id="home-eurc">—</div>
+            <div class="stat-sub">Arc Testnet</div>
+          </div>
+          <div class="stat-card green">
+            <div class="stat-label">Total Sent (All Time)</div>
+            <div class="stat-val green" id="home-sent">—</div>
+            <div class="stat-sub">Transactions</div>
+          </div>
+          <div class="stat-card amber">
+            <div class="stat-label">Total Received</div>
+            <div class="stat-val amber" id="home-recv">—</div>
+            <div class="stat-sub">Transactions</div>
+          </div>
+        </div>
+
+        <div class="grid2 mb-16">
+          <div class="card">
+            <div class="section-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+              Recent Transactions
+            </div>
+            <div id="home-tx-list">
+              <div class="empty-state text-xs">Connect wallet to load transactions</div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="section-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="4" width="18" height="18" rx="2" />
+                <line x1="16" y1="2" x2="16" y2="6" />
+                <line x1="8" y1="2" x2="8" y2="6" />
+                <line x1="3" y1="10" x2="21" y2="10" />
+              </svg>
+              Scheduled Payments
+            </div>
+            <div id="home-schedule-list">
+              <div class="empty-state text-xs">No scheduled payments</div>
+            </div>
+            <button class="btn btn-secondary btn-sm btn-full mt-12" onclick="nav('schedule')">+ Add Schedule</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="section-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            How CRAPAY Works
+          </div>
+          <div class="how-grid">
+            <div class="how-card">
+              <div class="how-icon">⚡</div>
+              <h3>Sub-second Finality</h3>
+              <p>Transactions confirm in under 1 second on Arc Testnet with deterministic finality.</p>
+            </div>
+            <div class="how-card">
+              <div class="how-icon">💸</div>
+              <h3>Near-zero Gas</h3>
+              <p>Pay gas in USDC at stable, predictable prices. No ETH needed.</p>
+            </div>
+            <div class="how-card">
+              <div class="how-icon">🔐</div>
+              <h3>EVM Compatible</h3>
+              <p>Full Solidity & EVM support. Your existing tools work unchanged on Arc.</p>
+            </div>
+            <div class="how-card">
+              <div class="how-icon">🌐</div>
+              <h3>USDC & EURC Native</h3>
+              <p>Multi-stablecoin support. Send USD or EUR stablecoins globally, instantly.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════════ SEND ══════════════ -->
+      <div class="page" id="page-send">
+        <div class="grid2">
+          <div class="card">
+            <div class="section-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
+              Send Payment
+            </div>
+            <div class="token-tabs" id="send-token-tabs">
+              <div class="token-tab active" data-token="USDC" onclick="selectToken(this,'send-token-tabs')">💵 USDC
+              </div>
+              <div class="token-tab" data-token="EURC" onclick="selectToken(this,'send-token-tabs')">💶 EURC</div>
+            </div>
+            <div class="field"><label>Recipient Address</label><input type="text" id="send-to"
+                placeholder="0x... wallet address" list="contact-datalist" /><datalist id="contact-datalist"></datalist>
+            </div>
+            <div class="field"><label>Amount</label><input type="number" id="send-amount" placeholder="0.00" min="0"
+                step="0.01" /></div>
+            <div class="field"><label>Message (optional)</label><textarea id="send-msg"
+                placeholder="What's this for?"></textarea></div>
+            <div class="field"><label>Tag</label>
+              <select id="send-tag">
+                <option value="">No tag</option>
+                <option value="work">#work</option>
+                <option value="personal">#personal</option>
+                <option value="food">#food</option>
+                <option value="rent">#rent</option>
+                <option value="other">#other</option>
+              </select>
+            </div>
+            <button class="btn btn-primary btn-full" id="send-btn" onclick="doSend()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
+              Send Payment
+            </button>
+          </div>
+          <div class="card">
+            <div class="section-title">Your Balances</div>
+            <div class="card-inner mb-12">
+              <div class="text-xs text-muted mb-4">USDC Balance</div>
+              <div class="fw700 mono" id="send-usdc-bal">— USDC</div>
+            </div>
+            <div class="card-inner mb-12">
+              <div class="text-xs text-muted mb-4">EURC Balance</div>
+              <div class="fw700 mono" id="send-eurc-bal">— EURC</div>
+            </div>
+            <div class="card-inner">
+              <div class="text-xs text-muted mb-4">Network</div>
+              <div class="flex items-center gap-8 text-sm" style="color:var(--green)">
+                <div class="net-dot"></div>Arc Testnet · ~0s finality
+              </div>
+            </div>
+            <div class="mt-16 text-xs text-muted">
+              Need testnet tokens? Get them at
+              <a href="https://faucet.circle.com/" target="_blank">faucet.circle.com</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════════ QR PAY ══════════════ -->
+      <div class="page" id="page-qrpay">
+        <div class="grid2">
+          <div class="card">
+            <div class="section-title">Create QR Payment</div>
+            <div class="token-tabs" id="qr-token-tabs">
+              <div class="token-tab active" data-token="USDC" onclick="selectToken(this,'qr-token-tabs')">💵 USDC</div>
+              <div class="token-tab" data-token="EURC" onclick="selectToken(this,'qr-token-tabs')">💶 EURC</div>
+            </div>
+            <div class="field"><label>Receiver Address</label><input type="text" id="qr-addr"
+                placeholder="0x... wallet address" /></div>
+            <div class="field"><label>Amount</label><input type="number" id="qr-amount" placeholder="0.00"
+                oninput="updateQR()" /></div>
+            <div class="field"><label>Message</label><textarea id="qr-msg" placeholder="Payment message..."
+                oninput="updateQR()"></textarea></div>
+            <button class="btn btn-primary btn-full" onclick="generateQR()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+                <path d="M14 14h3v3m0 4h4v-4m-4 0v-3h4" />
+              </svg>
+              Generate QR Code
+            </button>
+          </div>
+          <div class="card text-center">
+            <div class="section-title" style="justify-content:center">QR Preview</div>
+            <div id="qr-output"
+              style="min-height:160px;display:flex;align-items:center;justify-content:center;color:var(--text3);font-size:12px">
+              Fill the form and click Generate
+            </div>
+            <div id="qr-link-box" style="display:none" class="mt-16">
+              <div class="link-box">
+                <span class="link-text" id="qr-link-text"></span>
+                <button class="copy-btn" onclick="copyText('qr-link-text')">Copy</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════════ SCAN QR ══════════════ -->
+      <div class="page" id="page-scanqr">
+        <div class="card" style="max-width:560px;margin:0 auto">
+          <div class="section-title">Scan QR Code</div>
+          <div class="scan-tabs">
+            <div class="scan-tab active" id="tab-camera" onclick="switchScan('camera')">📷 Camera</div>
+            <div class="scan-tab" id="tab-image" onclick="switchScan('image')">🖼️ Upload Image</div>
+          </div>
+          <div id="scan-camera-box">
+            <div id="reader" style="width:100%"></div>
+            <button class="btn btn-secondary btn-full mt-12" id="scan-start-btn" onclick="startCamera()">Start
+              Camera</button>
+          </div>
+          <div id="scan-image-box" style="display:none">
+            <div class="field"><label>Upload QR Image</label><input type="file" id="qr-file" accept="image/*"
+                onchange="scanImageFile(this)" /></div>
+          </div>
+          <div id="scan-result" class="mt-12"></div>
+        </div>
+      </div>
+
+      <!-- ══════════════ MULTI-SEND ══════════════ -->
+      <div class="page" id="page-multisend">
+        <div class="grid2">
+          <div class="card">
+            <div class="section-title">Multi-send (Batch Transfer)</div>
+            <div class="token-tabs" id="multi-token-tabs">
+              <div class="token-tab active" data-token="USDC" onclick="selectToken(this,'multi-token-tabs')">💵 USDC
+              </div>
+              <div class="token-tab" data-token="EURC" onclick="selectToken(this,'multi-token-tabs')">💶 EURC</div>
+            </div>
+            <div class="field"><label>Message for all</label><input type="text" id="multi-msg"
+                placeholder="Payroll, rewards..." /></div>
+            <div id="multi-recipients">
+              <div class="recipient-row"><input type="text" placeholder="0x...address" class="field"
+                  style="flex:2" /><input type="number" placeholder="Amount" class="field" style="flex:1" /><button
+                  class="rm-btn" onclick="removeRecipient(this)">×</button></div>
+              <div class="recipient-row"><input type="text" placeholder="0x...address" class="field"
+                  style="flex:2" /><input type="number" placeholder="Amount" class="field" style="flex:1" /><button
+                  class="rm-btn" onclick="removeRecipient(this)">×</button></div>
+            </div>
+            <button class="btn btn-secondary btn-sm mb-12" onclick="addRecipient()">+ Add Recipient</button>
+            <hr class="divider" />
+            <div class="flex justify-between mb-8"><span class="text-muted text-sm">Recipients</span><span class="fw600"
+                id="multi-count">2</span></div>
+            <div class="flex justify-between mb-16"><span class="text-muted text-sm">Total</span><span
+                class="fw600 mono" id="multi-total" style="color:var(--p2)">0.00 USDC</span></div>
+            <button class="btn btn-primary btn-full" onclick="doMultiSend()">⚡ Send to All</button>
+          </div>
+          <div class="card">
+            <div class="section-title">Batch Info</div>
+            <div class="card-inner mb-12">
+              <div class="text-xs text-muted mb-4">Max per batch</div>
+              <div class="fw700" style="font-size:20px">50 wallets</div>
+            </div>
+            <div class="card-inner mb-12">
+              <div class="text-xs text-muted mb-4">Gas saved vs single</div>
+              <div class="fw700 green" style="font-size:20px;color:var(--green)">~70%</div>
+            </div>
+            <div style="padding:14px;background:var(--p4);border:1px solid var(--p3);border-radius:var(--r2)">
+              <div class="fw600 text-sm mb-8" style="color:var(--p2)">💡 Pro tip</div>
+              <div class="text-xs text-muted">Batch transfers execute all payments sequentially on Arc. Perfect for
+                payroll, airdrop, or reward distribution to multiple wallets.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════════ SPLIT BILL ══════════════ -->
+      <div class="page" id="page-split">
+        <div class="grid2">
+          <div class="card">
+            <div class="section-title">Split Bill</div>
+            <div class="field"><label>Total Amount (USDC)</label><input type="number" id="split-total"
+                placeholder="0.00" oninput="calcSplit()" /></div>
+            <div class="field"><label>Description</label><input type="text" id="split-desc"
+                placeholder="Dinner, trip, rent..." /></div>
+            <div class="mb-12">
+              <div class="text-xs text-muted mb-8">Select participants (from Contacts)</div>
+              <div id="split-participants"></div>
+            </div>
+            <div class="card-inner mb-16 flex justify-between items-center">
+              <span class="text-muted text-sm">Each person pays</span>
+              <span class="fw700 mono" id="split-each" style="font-size:16px;color:var(--p2)">0.00 USDC</span>
+            </div>
+            <button class="btn btn-primary btn-full" onclick="doSplitBill()">📤 Request from All</button>
+          </div>
+          <div class="card">
+            <div class="section-title">Split History</div>
+            <div id="split-history-list">
+              <div class="empty-state text-xs">No split bills yet</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════════ PAYMENT LINK ══════════════ -->
+      <div class="page" id="page-paylink">
+        <div class="grid2">
+          <div class="card">
+            <div class="section-title">Create Payment Link</div>
+            <div class="token-tabs" id="link-token-tabs">
+              <div class="token-tab active" data-token="USDC" onclick="selectToken(this,'link-token-tabs')">💵 USDC
+              </div>
+              <div class="token-tab" data-token="EURC" onclick="selectToken(this,'link-token-tabs')">💶 EURC</div>
+            </div>
+            <div class="field"><label>Amount (leave blank = any amount)</label><input type="number" id="link-amount"
+                placeholder="0.00" oninput="updateLinkPreview()" /></div>
+            <div class="field"><label>Message</label><input type="text" id="link-msg" placeholder="What's this for?"
+                oninput="updateLinkPreview()" /></div>
+            <div class="field"><label>Expiry</label>
+              <select id="link-exp" onchange="updateLinkPreview()">
+                <option value="">No expiry</option>
+                <option value="3600000">1 hour</option>
+                <option value="86400000">24 hours</option>
+                <option value="604800000">7 days</option>
+              </select>
+            </div>
+            <div class="mb-16">
+              <div class="text-xs text-muted mb-8">Generated link</div>
+              <div class="link-box"><span class="link-text" id="gen-link">Connect wallet first</span><button
+                  class="copy-btn" onclick="copyText('gen-link')">Copy</button></div>
+            </div>
+            <div id="link-qr-wrap" class="text-center mb-16"></div>
+            <button class="btn btn-primary btn-full" onclick="savePaymentLink()">💾 Save & Share</button>
+          </div>
+          <div class="card">
+            <div class="section-title">Active Links</div>
+            <div id="links-list">
+              <div class="empty-state text-xs">No payment links yet</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════════ SCHEDULED ══════════════ -->
+      <div class="page" id="page-schedule">
+        <div class="grid2">
+          <div class="card">
+            <div class="section-title">New Scheduled Payment</div>
+            <div class="token-tabs" id="sched-token-tabs">
+              <div class="token-tab active" data-token="USDC" onclick="selectToken(this,'sched-token-tabs')">💵 USDC
+              </div>
+              <div class="token-tab" data-token="EURC" onclick="selectToken(this,'sched-token-tabs')">💶 EURC</div>
+            </div>
+            <div class="field"><label>Recipient</label><input type="text" id="sched-to" placeholder="0x..." /></div>
+            <div class="field"><label>Amount</label><input type="number" id="sched-amount" placeholder="0.00" /></div>
+            <div class="field"><label>Message</label><input type="text" id="sched-msg"
+                placeholder="Monthly rent, salary..." /></div>
+            <div class="field"><label>Frequency</label>
+              <select id="sched-freq">
+                <option value="once">One-time</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly" selected>Monthly</option>
+              </select>
+            </div>
+            <div class="field"><label>Start Date</label><input type="date" id="sched-date" /></div>
+            <button class="btn btn-primary btn-full" onclick="doAddSchedule()">📅 Schedule Payment</button>
+          </div>
+          <div class="card">
+            <div class="section-title">Scheduled Payments</div>
+            <div id="schedule-list">
+              <div class="empty-state text-xs">No scheduled payments</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════════ CONTACTS ══════════════ -->
+      <div class="page" id="page-contacts">
+        <div class="grid2">
+          <div class="card">
+            <div class="section-title">Contact Book</div>
+            <div class="field mb-16"><input type="text" placeholder="🔍  Search contacts..." id="contact-search"
+                oninput="renderContacts()" /></div>
+            <div id="contacts-grid" class="contact-grid"></div>
+            <button class="btn btn-secondary btn-sm btn-full mt-12" onclick="openAddContact()">+ Add Contact</button>
+          </div>
+          <div class="card" id="contact-detail-card">
+            <div class="section-title">Contact Detail</div>
+            <div class="empty-state"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="1.5">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+              <div class="mt-8">Select a contact</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════════ ANALYTICS ══════════════ -->
+      <div class="page" id="page-analytics">
+        <div class="stat-grid mb-20">
+          <div class="stat-card purple">
+            <div class="stat-label">Total Sent (May)</div>
+            <div class="stat-val purple" id="ana-sent">—</div>
+          </div>
+          <div class="stat-card green">
+            <div class="stat-label">Total Received</div>
+            <div class="stat-val green" id="ana-recv">—</div>
+          </div>
+          <div class="stat-card teal">
+            <div class="stat-label">Transactions</div>
+            <div class="stat-val teal" id="ana-count">—</div>
+          </div>
+          <div class="stat-card amber">
+            <div class="stat-label">Net Flow</div>
+            <div class="stat-val amber" id="ana-net">—</div>
+          </div>
+        </div>
+        <div class="grid2">
+          <div class="card">
+            <div class="section-title">Volume (Last 7 Days)</div>
+            <div class="chart-wrap" id="chart-bars"></div>
+            <div class="flex justify-between text-xs text-muted mt-4" id="chart-labels"></div>
+          </div>
+          <div class="card">
+            <div class="section-title">Spending by Tag</div>
+            <div id="tag-breakdown">
+              <div class="empty-state text-xs">Load history to see breakdown</div>
+            </div>
+          </div>
+        </div>
+        <div class="card mt-16">
+          <div class="flex justify-between items-center mb-12">
+            <div class="section-title" style="margin-bottom:0">Token Distribution</div>
+            <button class="btn btn-secondary btn-sm" onclick="loadAnalytics()">🔄 Refresh</button>
+          </div>
+          <div id="token-dist" class="grid2">
+            <div class="card-inner text-center">
+              <div class="text-muted text-xs mb-4">USDC Activity</div>
+              <div class="fw700 mono" id="ana-usdc-vol" style="font-size:18px;color:var(--p2)">—</div>
+            </div>
+            <div class="card-inner text-center">
+              <div class="text-muted text-xs mb-4">EURC Activity</div>
+              <div class="fw700 mono" id="ana-eurc-vol" style="font-size:18px;color:var(--teal)">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════════ HISTORY ══════════════ -->
+      <div class="page" id="page-history">
+        <div class="grid2">
+          <div class="card">
+            <div class="section-title">Transaction History</div>
+            <div class="field-row mb-12">
+              <div class="field" style="flex:2;margin-bottom:0"><input type="text" placeholder="🔍 Search..."
+                  id="hist-search" oninput="filterHistory()" /></div>
+              <div class="field" style="margin-bottom:0">
+                <select id="hist-filter" onchange="filterHistory()">
+                  <option value="">All</option>
+                  <option value="sent">Sent</option>
+                  <option value="received">Received</option>
+                </select>
+              </div>
+            </div>
+            <div id="history-list">
+              <div class="empty-state">Connect wallet to see history</div>
+            </div>
+            <button class="btn btn-secondary btn-sm btn-full mt-12" id="load-history-btn" onclick="loadHistory()">Load
+              from Chain</button>
+          </div>
+          <div class="card">
+            <div class="section-title">Export</div>
+            <div class="field-row mb-16">
+              <div class="field" style="margin-bottom:0"><label>From</label><input type="date" id="exp-from" /></div>
+              <div class="field" style="margin-bottom:0"><label>To</label><input type="date" id="exp-to" /></div>
+            </div>
+            <div class="export-row" onclick="doExport('csv')">
+              <div class="flex items-center gap-12">
+                <div class="tx-icon recv" style="width:36px;height:36px;font-size:16px">📊</div>
+                <div>
+                  <div class="fw600 text-sm">Export as CSV</div>
+                  <div class="text-xs text-muted">Excel / Google Sheets compatible</div>
+                </div>
+              </div>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+            </div>
+            <div class="export-row" onclick="doExport('json')">
+              <div class="flex items-center gap-12">
+                <div class="tx-icon swap" style="width:36px;height:36px;font-size:16px">🗂️</div>
+                <div>
+                  <div class="fw600 text-sm">Export as JSON</div>
+                  <div class="text-xs text-muted">Raw data for developers</div>
+                </div>
+              </div>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════════ ALERTS ══════════════ -->
+      <div class="page" id="page-alerts">
+        <div class="grid2">
+          <div class="card">
+            <div class="section-title">Create Price Alert</div>
+            <div class="field"><label>Token Pair</label>
+              <select id="alert-pair">
+                <option value="USDC/USD">USDC / USD</option>
+                <option value="EURC/USD">EURC / USD</option>
+                <option value="EURC/USDC">EURC / USDC</option>
+              </select>
+            </div>
+            <div class="field"><label>Condition</label>
+              <select id="alert-cond">
+                <option value="above">Price goes above</option>
+                <option value="below">Price goes below</option>
+                <option value="change">Changes by %</option>
+              </select>
+            </div>
+            <div class="field"><label>Target value</label><input type="number" id="alert-val" placeholder="1.005"
+                step="0.001" /></div>
+            <div class="field"><label>Notify via</label>
+              <select id="alert-via">
+                <option value="inapp">In-app notification</option>
+                <option value="both">In-app + Email</option>
+              </select>
+            </div>
+            <button class="btn btn-primary btn-full" onclick="doAddAlert()">🔔 Create Alert</button>
+          </div>
+          <div class="card">
+            <div class="flex justify-between items-center mb-16">
+              <div class="section-title" style="margin-bottom:0">Notifications</div>
+              <button class="btn btn-secondary btn-sm" onclick="markAllRead()">Mark all read</button>
+            </div>
+            <div id="notifications-list">
+              <div class="notif-item unread">
+                <div class="notif-dot" style="background:var(--p)"></div>
+                <div>
+                  <div class="fw600 text-sm mb-4">Arc Testnet Online</div>
+                  <div class="text-xs text-muted">CRAPAY connected to Arc Testnet · Just now</div>
+                </div>
+              </div>
+            </div>
+            <div class="mt-16" id="alerts-list">
+              <div class="empty-state text-xs">No alerts configured</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- content -->
+  </div><!-- main -->
+
+  <!-- ── Modal ───────────────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal" onclick="closeModal(event)">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-title" id="modal-title"></div>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  </div>
+
+  <!-- ── Mobile Drawer Overlay ─────────────────────────────── -->
+  <div class="mobile-drawer-overlay" id="drawer-overlay" onclick="closeDrawer()"></div>
+
+  <!-- ── Mobile Drawer ─────────────────────────────────────── -->
+  <div class="mobile-drawer" id="mobile-drawer">
+    <div class="mobile-drawer-header">
+      <div class="mobile-drawer-logo">CRA<em>PAY</em></div>
+      <div class="drawer-close-btn" onclick="closeDrawer()">×</div>
+    </div>
+
+    <div class="mobile-drawer-net">
+      <div class="net-dot"></div>
+      <span>Arc Testnet</span>
+    </div>
+
+    <div class="nav-section">Main</div>
+    <div class="nav-item active" onclick="navDrawer('home')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="7" height="7" rx="1" />
+        <rect x="14" y="3" width="7" height="7" rx="1" />
+        <rect x="3" y="14" width="7" height="7" rx="1" />
+        <rect x="14" y="14" width="7" height="7" rx="1" />
+      </svg>
+      <span>Dashboard</span>
+    </div>
+    <div class="nav-item" onclick="navDrawer('send')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="22" y1="2" x2="11" y2="13" />
+        <polygon points="22 2 15 22 11 13 2 9 22 2" />
+      </svg>
+      <span>Send Payment</span>
+    </div>
+    <div class="nav-item" onclick="navDrawer('qrpay')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="7" height="7" />
+        <rect x="14" y="3" width="7" height="7" />
+        <rect x="3" y="14" width="7" height="7" />
+        <path d="M14 14h3v3m0 4h4v-4m-4 0v-3h4" />
+      </svg>
+      <span>QR Payment</span>
+    </div>
+    <div class="nav-item" onclick="navDrawer('scanqr')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
+        <rect x="7" y="7" width="10" height="10" rx="1" />
+      </svg>
+      <span>Scan QR</span>
+    </div>
+    <div class="nav-item" onclick="navDrawer('multisend')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+      <span>Multi-send</span>
+    </div>
+    <div class="nav-item" onclick="navDrawer('split')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="16" />
+        <line x1="8" y1="12" x2="16" y2="12" />
+      </svg>
+      <span>Split Bill</span>
+    </div>
+
+    <div class="nav-section">Tools</div>
+    <div class="nav-item" onclick="navDrawer('paylink')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+      </svg>
+      <span>Payment Link</span>
+    </div>
+    <div class="nav-item" onclick="navDrawer('schedule')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="4" width="18" height="18" rx="2" />
+        <line x1="16" y1="2" x2="16" y2="6" />
+        <line x1="8" y1="2" x2="8" y2="6" />
+        <line x1="3" y1="10" x2="21" y2="10" />
+        <circle cx="12" cy="16" r="2" />
+      </svg>
+      <span>Scheduled</span>
+    </div>
+    <div class="nav-item" onclick="navDrawer('contacts')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+      <span>Contacts</span>
+    </div>
+
+    <div class="nav-section">Insights</div>
+    <div class="nav-item" onclick="navDrawer('analytics')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="18" y1="20" x2="18" y2="10" />
+        <line x1="12" y1="20" x2="12" y2="4" />
+        <line x1="6" y1="20" x2="6" y2="14" />
+      </svg>
+      <span>Analytics</span>
+    </div>
+    <div class="nav-item" onclick="navDrawer('history')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="12 6 12 12 16 14" />
+      </svg>
+      <span>History</span>
+    </div>
+    <div class="nav-item" onclick="navDrawer('alerts')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+      </svg>
+      <span>Price Alerts</span>
+    </div>
+
+    <div class="mobile-drawer-footer">
+      Build on <a href="https://arc.io" target="_blank">Arc Testnet</a><br />© 2026 CRAPAY
+    </div>
+  </div>
+
+  <!-- ── Mobile Bottom Nav ──────────────────────────────────── -->
+  <nav class="mobile-nav">
+    <div class="mobile-nav-item active" onclick="nav('home')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="7" height="7" rx="1" />
+        <rect x="14" y="3" width="7" height="7" rx="1" />
+        <rect x="3" y="14" width="7" height="7" rx="1" />
+        <rect x="14" y="14" width="7" height="7" rx="1" />
+      </svg>
+      <span>Home</span>
+    </div>
+    <div class="mobile-nav-item" onclick="nav('send')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="22" y1="2" x2="11" y2="13" />
+        <polygon points="22 2 15 22 11 13 2 9 22 2" />
+      </svg>
+      <span>Send</span>
+    </div>
+    <div class="mobile-nav-item" onclick="nav('scanqr')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
+        <rect x="7" y="7" width="10" height="10" rx="1" />
+      </svg>
+      <span>Scan</span>
+    </div>
+    <div class="mobile-nav-item" onclick="nav('history')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="12 6 12 12 16 14" />
+      </svg>
+      <span>History</span>
+    </div>
+    <div class="mobile-nav-item" onclick="nav('contacts')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+      <span>Contacts</span>
+    </div>
+  </nav>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.1/dist/ethers.umd.min.js"></script>
+  <script type="module" src="/src/app.ts"></script>
+
+</body>
+
+</html>
