@@ -1784,32 +1784,74 @@ async function doSplitBill() {
   const realParticipants = state.contacts.filter(
     (c) => participantIds.includes(c.id) && ethers.isAddress(c.address),
   );
-  if (!realParticipants.length && state.contacts.length > 0) {
-    toast(
-      "info",
-      "Add real wallet addresses to contacts to send transactions.",
-    );
-  }
 
+  const billId = Date.now();
   const bill = {
-    id: Date.now(),
+    id: billId,
     desc,
     total,
     each,
     count: checked.length,
     ts: Date.now(),
     settled: false,
+    createdBy: state.address!.toLowerCase(),
+    participants: realParticipants.map((c) => ({
+      name: c.name,
+      address: c.address.toLowerCase(),
+    })),
   };
+
+  // 1. Lưu vào Firestore của người tạo
   await fbSave("splitBills", bill);
   state.splitBills.unshift(bill);
   renderSplitHistory();
+
+  // 2. Ghi record + notification vào Firestore của TỪNG participant
+  const creatorShort = shortAddr(state.address);
+  const writePromises = realParticipants.map(async (c) => {
+    const participantAddr = c.address.toLowerCase();
+
+    // splitBills record — path: users/{participantAddr}/splitBills/{billId}
+    const billRef = doc(db, "users", participantAddr, "splitBills", String(billId));
+    await setDoc(billRef, {
+      ...bill,
+      ownerAddress: participantAddr,
+      settled: false,
+      updatedAt: Date.now(),
+    });
+
+    // notification — path: users/{participantAddr}/notifications/{notifId}
+    const notifId = Date.now() + Math.floor(Math.random() * 1000);
+    const notifRef = doc(db, "users", participantAddr, "notifications", String(notifId));
+    await setDoc(notifRef, {
+      id: notifId,
+      text: `💸 ${creatorShort} yêu cầu bạn trả ${each} USDC cho "${desc}"`,
+      time: Date.now(),
+      read: false,
+      ownerAddress: participantAddr,
+      type: "split_request",
+      billId,
+      from: state.address!.toLowerCase(),
+      amount: each,
+      updatedAt: Date.now(),
+    });
+  });
+
+  try {
+    await Promise.all(writePromises);
+    await pushNotif(`Split bill "${desc}" đã gửi đến ${realParticipants.length} người`);
+  } catch (e) {
+    console.error("Failed to notify participants", e);
+    toast("error", "Một số thông báo gửi thất bại");
+  }
 
   showSuccessModal(
     "✂️ Split Bill Created",
     `
     <div class="card-inner mb-12"><div class="text-xs text-muted mb-4">Total</div><div class="fw700 mono">${sanitize(total)} USDC</div></div>
     <div class="card-inner mb-12"><div class="text-xs text-muted mb-4">Per Person</div><div class="fw700 mono" style="color:var(--p2)">${sanitize(each)} USDC</div></div>
-    <div class="card-inner mb-16"><div class="text-xs text-muted mb-4">Participants</div><div class="fw700">${checked.length} people</div></div>
+    <div class="card-inner mb-12"><div class="text-xs text-muted mb-4">Participants</div><div class="fw700">${checked.length} people</div></div>
+    ${realParticipants.length ? `<div class="card-inner mb-16"><div class="text-xs text-muted mb-4">Đã thông báo</div><div class="fw600 text-sm">${realParticipants.map(c => sanitize(c.name)).join(", ")}</div></div>` : ""}
     <button class="btn btn-secondary btn-full" onclick="closeModal()">Done</button>`,
   );
 }
@@ -1822,23 +1864,156 @@ function renderSplitHistory() {
     el.innerHTML = '<div class="empty-state text-xs">No split bills yet</div>';
     return;
   }
+
   el.innerHTML = state.splitBills
-    .map(
-      (b) => `
-    <div class="tx-item">
-      <div class="tx-icon" style="background:rgba(255,181,71,.1);color:var(--amber);font-size:16px">✂️</div>
-      <div class="tx-meta">
-        <div class="tx-addr">${sanitize(b.desc)}</div>
-        <div class="tx-msg">${sanitize(String(b.count))} people · Each: ${sanitize(b.each)} USDC</div>
-        <div class="tx-time">${fmtDate(b.ts)}</div>
-      </div>
-      <span class="tag ${b.settled ? "tag-green" : "tag-amber"}">${b.settled ? "Settled" : "Pending"}</span>
-    </div>`,
-    )
+    .map((b) => {
+      const isOwner =
+        !b.createdBy ||
+        b.createdBy.toLowerCase() === state.address?.toLowerCase();
+
+      // Bill mình tạo
+      if (isOwner) {
+        return `
+        <div class="tx-item">
+          <div class="tx-icon" style="background:rgba(255,181,71,.1);color:var(--amber);font-size:16px">✂️</div>
+          <div class="tx-meta">
+            <div class="tx-addr fw600">${sanitize(b.desc)}</div>
+            <div class="tx-msg text-xs text-muted">Bạn tạo · ${sanitize(String(b.count))} người · Mỗi người: <span class="fw600" style="color:var(--amber)">${sanitize(b.each)} USDC</span></div>
+            <div class="tx-time">${fmtDate(b.ts)}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+            <span class="tag ${b.settled ? "tag-green" : "tag-amber"}">${b.settled ? "Settled" : "Pending"}</span>
+            <span class="text-xs text-muted">Total: ${sanitize(b.total)} USDC</span>
+          </div>
+        </div>`;
+      }
+
+      // Bill người khác chia cho mình
+      const fromName = sanitize(
+        b.participants?.find(
+          (p: any) => p.address?.toLowerCase() === b.createdBy?.toLowerCase()
+        )?.name ?? shortAddr(b.createdBy)
+      );
+
+      return `
+      <div class="tx-item" style="border-left:3px solid var(--p2);padding-left:10px">
+        <div class="tx-icon" style="background:rgba(108,99,255,.15);color:var(--p2);font-size:16px">📩</div>
+        <div class="tx-meta">
+          <div class="tx-addr fw600">${sanitize(b.desc)}</div>
+          <div class="tx-msg text-xs text-muted">
+            Từ <span class="fw600" style="color:var(--p2)">${fromName}</span> · Bạn cần trả: <span class="fw600" style="color:var(--red)">${sanitize(b.each)} USDC</span>
+          </div>
+          <div class="tx-time">${fmtDate(b.ts)}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+          <span class="tag ${b.settled ? "tag-green" : "tag-p"}">${b.settled ? "Đã trả" : "Chưa trả"}</span>
+          ${
+            !b.settled
+              ? `<button 
+                  class="btn btn-primary btn-sm" 
+                  style="font-size:11px;padding:4px 10px"
+                  onclick="payBackSplit('${sanitize(b.createdBy)}','${sanitize(b.each)}','${sanitize(b.id)}','${sanitize(b.desc)}')"
+                >Trả ngay</button>`
+              : ""
+          }
+        </div>
+      </div>`;
+    })
     .join("");
 }
 (window as any).renderSplitHistory = renderSplitHistory;
 
+async function payBackSplit(
+  toAddr: string,
+  amount: string,
+  billId: string,
+  desc: string
+) {
+  if (!requireWallet()) return;
+
+  const confirmed = await Swal.fire({
+    title: `Trả ${amount} USDC?`,
+    text: `Cho: ${desc}`,
+    icon: "question",
+    showCancelButton: true,
+    confirmButtonText: "Xác nhận",
+    cancelButtonText: "Hủy",
+    background: "#0f1118",
+    color: "#eef0ff",
+    confirmButtonColor: "#6c63ff",
+  });
+  if (!confirmed.isConfirmed) return;
+
+  const btn = document.querySelector(
+    `[onclick*="payBackSplit"][onclick*="${billId}"]`
+  ) as HTMLButtonElement | null;
+  setLoading(btn, true, "Đang gửi…");
+
+  try {
+    const tx = await sendOnChain(toAddr, amount, "USDC", `Split: ${desc}`);
+    await refreshBalances();
+
+    // Đánh dấu settled trong Firestore của mình
+    const bill = state.splitBills.find((b) => String(b.id) === String(billId));
+    if (bill) {
+      bill.settled = true;
+      bill.settledTx = tx.hash;
+      bill.settledAt = Date.now();
+      await fbSave("splitBills", bill);
+    }
+
+    // Đánh dấu settled trong Firestore của người tạo bill
+    try {
+      const ownerBillRef = doc(
+        db,
+        "users",
+        toAddr.toLowerCase(),
+        "splitBills",
+        String(billId)
+      );
+      await setDoc(
+        ownerBillRef,
+        { settled: true, settledBy: state.address!.toLowerCase(), settledAt: Date.now() },
+        { merge: true }
+      );
+    } catch {
+      /* non-critical */
+    }
+
+    await addToHistory({
+      hash: tx.hash,
+      from: state.address!,
+      to: toAddr,
+      amount,
+      token: "USDC",
+      type: "sent",
+      msg: `Split: ${desc}`,
+      ts: Date.now(),
+    });
+
+    await pushNotif(`Đã trả ${amount} USDC cho split bill "${desc}"`);
+    renderSplitHistory();
+
+    showSuccessModal(
+      "✅ Đã thanh toán!",
+      `
+      <div class="card-inner mb-12">
+        <div class="text-xs text-muted mb-4">Số tiền</div>
+        <div class="fw700 mono" style="font-size:20px;color:var(--green)">${sanitize(amount)} USDC</div>
+      </div>
+      <div class="card-inner mb-16">
+        <div class="text-xs text-muted mb-4">Transaction</div>
+        <a href="${ARC.explorer}/tx/${tx.hash}" target="_blank" class="mono text-xs">${shortHash(tx.hash)}</a>
+      </div>
+      <button class="btn btn-secondary btn-full" onclick="closeModal()">Done</button>`
+    );
+  } catch (e: unknown) {
+    toast("error", e instanceof Error ? e.message : "Transaction failed");
+  } finally {
+    setLoading(btn, false, "Trả ngay");
+  }
+}
+(window as any).payBackSplit = payBackSplit;
 // ── Transaction History ────────────────────────────────────
 // Fix #14: write to Firestore FIRST, then update state
 async function addToHistory(tx: TxHistory) {
