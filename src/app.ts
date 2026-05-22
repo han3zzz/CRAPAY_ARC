@@ -1769,9 +1769,7 @@ async function doSplitBill() {
     toast("error", "Enter a valid total amount");
     return;
   }
-  const checked = document.querySelectorAll(
-    "#split-participants .split-check.on",
-  );
+  const checked = document.querySelectorAll("#split-participants .split-check.on");
   if (!checked.length) {
     toast("error", "Select at least one participant");
     return;
@@ -1779,10 +1777,10 @@ async function doSplitBill() {
   const each = (parseFloat(total) / checked.length).toFixed(2);
 
   const participantIds = [...checked].map((c) =>
-    parseInt((c as HTMLElement).id.replace("sp-", "")),
+    parseInt((c as HTMLElement).id.replace("sp-", ""))
   );
   const realParticipants = state.contacts.filter(
-    (c) => participantIds.includes(c.id) && ethers.isAddress(c.address),
+    (c) => participantIds.includes(c.id) && ethers.isAddress(c.address)
   );
 
   const billId = Date.now();
@@ -1795,32 +1793,29 @@ async function doSplitBill() {
     ts: Date.now(),
     settled: false,
     createdBy: state.address!.toLowerCase(),
+    // Mỗi participant có trạng thái paid riêng
     participants: realParticipants.map((c) => ({
       name: c.name,
       address: c.address.toLowerCase(),
+      paid: false,
+      paidAt: null,
+      txHash: null,
     })),
   };
 
-  // 1. Lưu vào Firestore của người tạo
   await fbSave("splitBills", bill);
   state.splitBills.unshift(bill);
   renderSplitHistory();
 
-  // 2. Ghi record + notification vào Firestore của TỪNG participant
   const creatorShort = shortAddr(state.address);
   const writePromises = realParticipants.map(async (c) => {
     const participantAddr = c.address.toLowerCase();
-
-    // splitBills record — path: users/{participantAddr}/splitBills/{billId}
     const billRef = doc(db, "users", participantAddr, "splitBills", String(billId));
     await setDoc(billRef, {
       ...bill,
       ownerAddress: participantAddr,
-      settled: false,
       updatedAt: Date.now(),
     });
-
-    // notification — path: users/{participantAddr}/notifications/{notifId}
     const notifId = Date.now() + Math.floor(Math.random() * 1000);
     const notifRef = doc(db, "users", participantAddr, "notifications", String(notifId));
     await setDoc(notifRef, {
@@ -1851,8 +1846,8 @@ async function doSplitBill() {
     <div class="card-inner mb-12"><div class="text-xs text-muted mb-4">Total</div><div class="fw700 mono">${sanitize(total)} USDC</div></div>
     <div class="card-inner mb-12"><div class="text-xs text-muted mb-4">Per Person</div><div class="fw700 mono" style="color:var(--p2)">${sanitize(each)} USDC</div></div>
     <div class="card-inner mb-12"><div class="text-xs text-muted mb-4">Participants</div><div class="fw700">${checked.length} people</div></div>
-    ${realParticipants.length ? `<div class="card-inner mb-16"><div class="text-xs text-muted mb-4">Đã thông báo</div><div class="fw600 text-sm">${realParticipants.map(c => sanitize(c.name)).join(", ")}</div></div>` : ""}
-    <button class="btn btn-secondary btn-full" onclick="closeModal()">Done</button>`,
+    ${realParticipants.length ? `<div class="card-inner mb-16"><div class="text-xs text-muted mb-4">Đã thông báo</div><div class="fw600 text-sm">${realParticipants.map((c) => sanitize(c.name)).join(", ")}</div></div>` : ""}
+    <button class="btn btn-secondary btn-full" onclick="closeModal()">Done</button>`
   );
 }
 (window as any).doSplitBill = doSplitBill;
@@ -1871,57 +1866,153 @@ function renderSplitHistory() {
         !b.createdBy ||
         b.createdBy.toLowerCase() === state.address?.toLowerCase();
 
-      // Bill mình tạo
+      const paidCount = (b.participants ?? []).filter((p: any) => p.paid).length;
+      const totalCount = b.participants?.length ?? b.count ?? 0;
+
       if (isOwner) {
+        const allSettled = totalCount > 0 && paidCount === totalCount;
         return `
-        <div class="tx-item">
+        <div class="tx-item" style="cursor:pointer" onclick="showSplitDetail('${b.id}')">
           <div class="tx-icon" style="background:rgba(255,181,71,.1);color:var(--amber);font-size:16px">✂️</div>
           <div class="tx-meta">
             <div class="tx-addr fw600">${sanitize(b.desc)}</div>
-            <div class="tx-msg text-xs text-muted">Bạn tạo · ${sanitize(String(b.count))} người · Mỗi người: <span class="fw600" style="color:var(--amber)">${sanitize(b.each)} USDC</span></div>
+            <div class="tx-msg text-xs text-muted">
+              Bạn tạo · ${sanitize(b.each)} USDC/người
+              ${totalCount ? `· <span style="color:${paidCount === totalCount ? "var(--green)" : "var(--amber)"}">${paidCount}/${totalCount} đã trả</span>` : ""}
+            </div>
             <div class="tx-time">${fmtDate(b.ts)}</div>
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
-            <span class="tag ${b.settled ? "tag-green" : "tag-amber"}">${b.settled ? "Settled" : "Pending"}</span>
+            <span class="tag ${allSettled ? "tag-green" : "tag-amber"}">${allSettled ? "Settled" : "Pending"}</span>
             <span class="text-xs text-muted">Total: ${sanitize(b.total)} USDC</span>
           </div>
         </div>`;
       }
 
-      // Bill người khác chia cho mình
-      const fromName = sanitize(
-        b.participants?.find(
-          (p: any) => p.address?.toLowerCase() === b.createdBy?.toLowerCase()
-        )?.name ?? shortAddr(b.createdBy)
+      // Phía người được chia — tìm trạng thái paid của chính mình
+      const myEntry = (b.participants ?? []).find(
+        (p: any) => p.address?.toLowerCase() === state.address?.toLowerCase()
       );
+      const iMePaid = myEntry?.paid ?? b.settled ?? false;
+      const fromName = sanitize(shortAddr(b.createdBy));
 
       return `
-      <div class="tx-item" style="border-left:3px solid var(--p2);padding-left:10px">
+      <div class="tx-item" style="cursor:pointer;border-left:3px solid var(--p2);padding-left:10px" onclick="showSplitDetail('${b.id}')">
         <div class="tx-icon" style="background:rgba(108,99,255,.15);color:var(--p2);font-size:16px">📩</div>
         <div class="tx-meta">
           <div class="tx-addr fw600">${sanitize(b.desc)}</div>
           <div class="tx-msg text-xs text-muted">
-            Từ <span class="fw600" style="color:var(--p2)">${fromName}</span> · Bạn cần trả: <span class="fw600" style="color:var(--red)">${sanitize(b.each)} USDC</span>
+            Từ <span class="fw600" style="color:var(--p2)">${fromName}</span>
+            · <span class="fw600" style="color:${iMePaid ? "var(--green)" : "var(--red)"}">${iMePaid ? "Đã trả" : "Cần trả"} ${sanitize(b.each)} USDC</span>
           </div>
           <div class="tx-time">${fmtDate(b.ts)}</div>
         </div>
-        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
-          <span class="tag ${b.settled ? "tag-green" : "tag-p"}">${b.settled ? "Đã trả" : "Chưa trả"}</span>
-          ${
-            !b.settled
-              ? `<button 
-                  class="btn btn-primary btn-sm" 
-                  style="font-size:11px;padding:4px 10px"
-                  onclick="payBackSplit('${sanitize(b.createdBy)}','${sanitize(b.each)}','${sanitize(b.id)}','${sanitize(b.desc)}')"
-                >Trả ngay</button>`
-              : ""
-          }
-        </div>
+        <span class="tag ${iMePaid ? "tag-green" : "tag-p"}">${iMePaid ? "Đã trả" : "Chưa trả"}</span>
       </div>`;
     })
     .join("");
 }
 (window as any).renderSplitHistory = renderSplitHistory;
+
+function showSplitDetail(billId: string | number) {
+  const b = state.splitBills.find((x) => String(x.id) === String(billId));
+  if (!b) return;
+
+  const isOwner =
+    !b.createdBy ||
+    b.createdBy.toLowerCase() === state.address?.toLowerCase();
+
+  const participants: any[] = b.participants ?? [];
+  const paidCount = participants.filter((p) => p.paid).length;
+
+  // Render danh sách participants
+  const participantRows = participants.length
+    ? participants
+        .map((p) => {
+          const isMe =
+            p.address?.toLowerCase() === state.address?.toLowerCase();
+          return `
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;
+                background:${p.paid ? "rgba(34,217,138,.15)" : "rgba(108,99,255,.15)"};
+                color:${p.paid ? "var(--green)" : "var(--p2)"}">
+                ${p.paid ? "✓" : sanitize((p.name ?? "?").slice(0, 2).toUpperCase())}
+              </div>
+              <div>
+                <div class="fw600 text-sm">${sanitize(p.name ?? shortAddr(p.address))}${isMe ? ' <span style="color:var(--p2);font-size:10px">(bạn)</span>' : ""}</div>
+                <div class="mono text-xs text-muted">${sanitize(shortAddr(p.address))}</div>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+              ${
+                p.paid
+                  ? `<span class="tag tag-green">Đã trả</span>
+                     ${p.txHash ? `<a href="${ARC.explorer}/tx/${p.txHash}" target="_blank" class="mono text-xs" style="color:var(--text3)">${shortHash(p.txHash)}</a>` : ""}`
+                  : isMe && !isOwner
+                  ? `<button class="btn btn-primary btn-sm" style="font-size:11px"
+                       onclick="closeModal();payBackSplit('${sanitize(b.createdBy)}','${sanitize(b.each)}','${sanitize(String(b.id))}','${sanitize(b.desc)}')">
+                       Trả ${sanitize(b.each)} USDC
+                     </button>`
+                  : `<span class="tag tag-amber">Chưa trả</span>`
+              }
+            </div>
+          </div>`;
+        })
+        .join("")
+    : `<div class="empty-state text-xs">Không có thông tin participants</div>`;
+
+  const progressPct =
+    participants.length > 0
+      ? Math.round((paidCount / participants.length) * 100)
+      : 0;
+
+  showModal(
+    `✂️ ${sanitize(b.desc)}`,
+    `
+    <!-- Tổng quan -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px">
+      <div class="card-inner" style="text-align:center">
+        <div class="text-xs text-muted mb-4">Tổng</div>
+        <div class="fw700 mono">${sanitize(b.total)} USDC</div>
+      </div>
+      <div class="card-inner" style="text-align:center">
+        <div class="text-xs text-muted mb-4">Mỗi người</div>
+        <div class="fw700 mono" style="color:var(--p2)">${sanitize(b.each)} USDC</div>
+      </div>
+      <div class="card-inner" style="text-align:center">
+        <div class="text-xs text-muted mb-4">Đã trả</div>
+        <div class="fw700 mono" style="color:${paidCount === participants.length && participants.length > 0 ? "var(--green)" : "var(--amber)"}">${paidCount}/${participants.length}</div>
+      </div>
+    </div>
+
+    <!-- Progress bar -->
+    ${
+      participants.length > 0
+        ? `<div style="margin-bottom:16px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+              <span class="text-xs text-muted">Tiến độ thu tiền</span>
+              <span class="text-xs fw600" style="color:var(--green)">${progressPct}%</span>
+            </div>
+            <div style="background:var(--bg3);border-radius:99px;height:6px;overflow:hidden">
+              <div style="height:100%;width:${progressPct}%;background:linear-gradient(90deg,var(--p),var(--teal));border-radius:99px;transition:width .4s"></div>
+            </div>
+          </div>`
+        : ""
+    }
+
+    <!-- Danh sách participants -->
+    <div class="section-title mb-8">Danh sách</div>
+    <div style="max-height:280px;overflow-y:auto">
+      ${participantRows}
+    </div>
+
+    <div class="text-xs text-muted mt-12">${fmtDate(b.ts)}</div>
+    <button class="btn btn-secondary btn-full mt-12" onclick="closeModal()">Đóng</button>
+  `
+  );
+}
+(window as any).showSplitDetail = showSplitDetail;
 
 async function payBackSplit(
   toAddr: string,
@@ -1944,40 +2035,37 @@ async function payBackSplit(
   });
   if (!confirmed.isConfirmed) return;
 
-  const btn = document.querySelector(
-    `[onclick*="payBackSplit"][onclick*="${billId}"]`
-  ) as HTMLButtonElement | null;
-  setLoading(btn, true, "Đang gửi…");
-
   try {
     const tx = await sendOnChain(toAddr, amount, "USDC", `Split: ${desc}`);
     await refreshBalances();
 
-    // Đánh dấu settled trong Firestore của mình
+    // Cập nhật paid=true cho chính mình trong participants[]
     const bill = state.splitBills.find((b) => String(b.id) === String(billId));
     if (bill) {
-      bill.settled = true;
-      bill.settledTx = tx.hash;
-      bill.settledAt = Date.now();
-      await fbSave("splitBills", bill);
-    }
+      const me = (bill.participants ?? []).find(
+        (p: any) => p.address?.toLowerCase() === state.address?.toLowerCase()
+      );
+      if (me) {
+        me.paid = true;
+        me.paidAt = Date.now();
+        me.txHash = tx.hash;
+      }
+      bill.settled = (bill.participants ?? []).every((p: any) => p.paid);
 
-    // Đánh dấu settled trong Firestore của người tạo bill
-    try {
-      const ownerBillRef = doc(
-        db,
-        "users",
-        toAddr.toLowerCase(),
-        "splitBills",
-        String(billId)
-      );
-      await setDoc(
-        ownerBillRef,
-        { settled: true, settledBy: state.address!.toLowerCase(), settledAt: Date.now() },
-        { merge: true }
-      );
-    } catch {
-      /* non-critical */
+      // Cập nhật Firestore của mình
+      await fbSave("splitBills", bill);
+
+      // Cập nhật Firestore của người tạo bill
+      try {
+        const ownerBillRef = doc(
+          db,
+          "users",
+          toAddr.toLowerCase(),
+          "splitBills",
+          String(billId)
+        );
+        await setDoc(ownerBillRef, { participants: bill.participants, settled: bill.settled, updatedAt: Date.now() }, { merge: true });
+      } catch { /* non-critical */ }
     }
 
     await addToHistory({
@@ -1991,7 +2079,7 @@ async function payBackSplit(
       ts: Date.now(),
     });
 
-    await pushNotif(`Đã trả ${amount} USDC cho split bill "${desc}"`);
+    await pushNotif(`Đã trả ${amount} USDC cho "${desc}"`);
     renderSplitHistory();
 
     showSuccessModal(
@@ -2009,8 +2097,6 @@ async function payBackSplit(
     );
   } catch (e: unknown) {
     toast("error", e instanceof Error ? e.message : "Transaction failed");
-  } finally {
-    setLoading(btn, false, "Trả ngay");
   }
 }
 (window as any).payBackSplit = payBackSplit;
