@@ -1701,16 +1701,7 @@ function renderSplitParticipants() {
   const list = state.contacts.length
     ? state.contacts
     : [
-        {
-          id: 1,
-          name: "Alice",
-          address: "0x0000000000000000000000000000000000000001",
-        },
-        {
-          id: 2,
-          name: "Bob",
-          address: "0x0000000000000000000000000000000000000002",
-        },
+       
       ];
   el.innerHTML = list
     .slice(0, 8)
@@ -1820,7 +1811,7 @@ async function doSplitBill() {
     const notifRef = doc(db, "users", participantAddr, "notifications", String(notifId));
     await setDoc(notifRef, {
       id: notifId,
-      text: `💸 ${creatorShort} yêu cầu bạn trả ${each} USDC cho "${desc}"`,
+      text: `💸 ${creatorShort} require you to pay ${each} USDC to "${desc}"`,
       time: Date.now(),
       read: false,
       ownerAddress: participantAddr,
@@ -1834,10 +1825,10 @@ async function doSplitBill() {
 
   try {
     await Promise.all(writePromises);
-    await pushNotif(`Split bill "${desc}" đã gửi đến ${realParticipants.length} người`);
+    await pushNotif(`Split bill "${desc}" sent ${realParticipants.length} person`);
   } catch (e) {
     console.error("Failed to notify participants", e);
-    toast("error", "Một số thông báo gửi thất bại");
+    toast("error", "Some notifications failed to send.");
   }
 
   showSuccessModal(
@@ -1877,8 +1868,8 @@ function renderSplitHistory() {
           <div class="tx-meta">
             <div class="tx-addr fw600">${sanitize(b.desc)}</div>
             <div class="tx-msg text-xs text-muted">
-              Bạn tạo · ${sanitize(b.each)} USDC/người
-              ${totalCount ? `· <span style="color:${paidCount === totalCount ? "var(--green)" : "var(--amber)"}">${paidCount}/${totalCount} đã trả</span>` : ""}
+              You create · ${sanitize(b.each)} USDC/person
+              ${totalCount ? `· <span style="color:${paidCount === totalCount ? "var(--green)" : "var(--amber)"}">${paidCount}/${totalCount} paid</span>` : ""}
             </div>
             <div class="tx-time">${fmtDate(b.ts)}</div>
           </div>
@@ -1903,11 +1894,11 @@ function renderSplitHistory() {
           <div class="tx-addr fw600">${sanitize(b.desc)}</div>
           <div class="tx-msg text-xs text-muted">
             Từ <span class="fw600" style="color:var(--p2)">${fromName}</span>
-            · <span class="fw600" style="color:${iMePaid ? "var(--green)" : "var(--red)"}">${iMePaid ? "Đã trả" : "Cần trả"} ${sanitize(b.each)} USDC</span>
+            · <span class="fw600" style="color:${iMePaid ? "var(--green)" : "var(--red)"}">${iMePaid ? "Paid" : "Payment required"} ${sanitize(b.each)} USDC</span>
           </div>
           <div class="tx-time">${fmtDate(b.ts)}</div>
         </div>
-        <span class="tag ${iMePaid ? "tag-green" : "tag-p"}">${iMePaid ? "Đã trả" : "Chưa trả"}</span>
+        <span class="tag ${iMePaid ? "tag-green" : "tag-p"}">${iMePaid ? "Paid" : "Not yet paid"}</span>
       </div>`;
     })
     .join("");
@@ -1940,7 +1931,7 @@ function showSplitDetail(billId: string | number) {
                 ${p.paid ? "✓" : sanitize((p.name ?? "?").slice(0, 2).toUpperCase())}
               </div>
               <div>
-                <div class="fw600 text-sm">${sanitize(p.name ?? shortAddr(p.address))}${isMe ? ' <span style="color:var(--p2);font-size:10px">(bạn)</span>' : ""}</div>
+                <div class="fw600 text-sm">${sanitize(p.name ?? shortAddr(p.address))}${isMe ? ' <span style="color:var(--p2);font-size:10px">(you)</span>' : ""}</div>
                 <div class="mono text-xs text-muted">${sanitize(shortAddr(p.address))}</div>
               </div>
             </div>
@@ -1952,15 +1943,15 @@ function showSplitDetail(billId: string | number) {
                   : isMe && !isOwner
                   ? `<button class="btn btn-primary btn-sm" style="font-size:11px"
                        onclick="closeModal();payBackSplit('${sanitize(b.createdBy)}','${sanitize(b.each)}','${sanitize(String(b.id))}','${sanitize(b.desc)}')">
-                       Trả ${sanitize(b.each)} USDC
+                       Paid ${sanitize(b.each)} USDC
                      </button>`
-                  : `<span class="tag tag-amber">Chưa trả</span>`
+                  : `<span class="tag tag-amber">Not yet paid</span>`
               }
             </div>
           </div>`;
         })
         .join("")
-    : `<div class="empty-state text-xs">Không có thông tin participants</div>`;
+    : `<div class="empty-state text-xs">No participant information available.</div>`;
 
   const progressPct =
     participants.length > 0
@@ -1973,15 +1964,15 @@ function showSplitDetail(billId: string | number) {
     <!-- Tổng quan -->
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px">
       <div class="card-inner" style="text-align:center">
-        <div class="text-xs text-muted mb-4">Tổng</div>
+        <div class="text-xs text-muted mb-4">Total</div>
         <div class="fw700 mono">${sanitize(b.total)} USDC</div>
       </div>
       <div class="card-inner" style="text-align:center">
-        <div class="text-xs text-muted mb-4">Mỗi người</div>
+        <div class="text-xs text-muted mb-4">Each person</div>
         <div class="fw700 mono" style="color:var(--p2)">${sanitize(b.each)} USDC</div>
       </div>
       <div class="card-inner" style="text-align:center">
-        <div class="text-xs text-muted mb-4">Đã trả</div>
+        <div class="text-xs text-muted mb-4">Paid</div>
         <div class="fw700 mono" style="color:${paidCount === participants.length && participants.length > 0 ? "var(--green)" : "var(--amber)"}">${paidCount}/${participants.length}</div>
       </div>
     </div>
@@ -1991,7 +1982,7 @@ function showSplitDetail(billId: string | number) {
       participants.length > 0
         ? `<div style="margin-bottom:16px">
             <div style="display:flex;justify-content:space-between;margin-bottom:6px">
-              <span class="text-xs text-muted">Tiến độ thu tiền</span>
+              <span class="text-xs text-muted">Payment collection progress</span>
               <span class="text-xs fw600" style="color:var(--green)">${progressPct}%</span>
             </div>
             <div style="background:var(--bg3);border-radius:99px;height:6px;overflow:hidden">
@@ -2002,13 +1993,13 @@ function showSplitDetail(billId: string | number) {
     }
 
     <!-- Danh sách participants -->
-    <div class="section-title mb-8">Danh sách</div>
+    <div class="section-title mb-8">List</div>
     <div style="max-height:280px;overflow-y:auto">
       ${participantRows}
     </div>
 
     <div class="text-xs text-muted mt-12">${fmtDate(b.ts)}</div>
-    <button class="btn btn-secondary btn-full mt-12" onclick="closeModal()">Đóng</button>
+    <button class="btn btn-secondary btn-full mt-12" onclick="closeModal()">Close</button>
   `
   );
 }
@@ -2027,8 +2018,8 @@ async function payBackSplit(
     text: `Cho: ${desc}`,
     icon: "question",
     showCancelButton: true,
-    confirmButtonText: "Xác nhận",
-    cancelButtonText: "Hủy",
+    confirmButtonText: "Comfirm",
+    cancelButtonText: "Cancel",
     background: "#0f1118",
     color: "#eef0ff",
     confirmButtonColor: "#6c63ff",
@@ -2079,14 +2070,14 @@ async function payBackSplit(
       ts: Date.now(),
     });
 
-    await pushNotif(`Đã trả ${amount} USDC cho "${desc}"`);
+    await pushNotif(`Paid ${amount} USDC to "${desc}"`);
     renderSplitHistory();
 
     showSuccessModal(
-      "✅ Đã thanh toán!",
+      "✅ Payment successful!",
       `
       <div class="card-inner mb-12">
-        <div class="text-xs text-muted mb-4">Số tiền</div>
+        <div class="text-xs text-muted mb-4">Amout</div>
         <div class="fw700 mono" style="font-size:20px;color:var(--green)">${sanitize(amount)} USDC</div>
       </div>
       <div class="card-inner mb-16">
