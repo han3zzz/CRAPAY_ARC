@@ -149,54 +149,70 @@ function lsClearWallet(): void {
   localStorage.removeItem(LS_WALLET_KEY);
 }
 
-async function debugFindHistory(): Promise<void> {
-  if (!state.address) return;
-  console.log("=== FIND HISTORY ===");
-  console.log("Looking under path: users/" + state.address.toLowerCase());
+async function debugChainFetch(): Promise<void> {
+  if (!state.address) { console.log("No address"); return; }
+  console.log("=== DEBUG CHAIN FETCH ===");
+  console.log("Address:", state.address);
+  
+  try {
+    const rpc = new ethers.JsonRpcProvider(ARC.rpc);
+    
+    // Check RPC connect được không
+    const latest = await rpc.getBlockNumber();
+    console.log("Latest block:", latest);
+    console.log("fromBlock:", Math.max(0, latest - 10000));
+    
+    const iface = new ethers.Interface([
+      "event Transfer(address indexed from, address indexed to, uint256 value)"
+    ]);
+    const transferTopic = iface.getEvent("Transfer")!.topicHash;
+    const user = ethers.getAddress(state.address);
+    const userTopic = ethers.zeroPadValue(user, 32);
+    
+    console.log("userTopic:", userTopic);
+    
+    // Chỉ check USDC sent logs
+    const fromBlock = Math.max(0, latest - 10000);
+    const sentLogs = await rpc.getLogs({
+      address: ARC.contracts.USDC,
+      topics: [transferTopic, userTopic, null],
+      fromBlock,
+      toBlock: latest,
+    });
+    console.log("USDC sent logs:", sentLogs.length);
 
-  // Check tất cả subcollections có thể có
-  const paths = [
-    "history",
-    "History", 
-    "txHistory",
-    "transactions",
-  ];
+    const recvLogs = await rpc.getLogs({
+      address: ARC.contracts.USDC,
+      topics: [transferTopic, null, userTopic],
+      fromBlock,
+      toBlock: latest,
+    });
+    console.log("USDC recv logs:", recvLogs.length);
 
-  for (const p of paths) {
-    try {
-      const snap = await getDocs(
-        collection(db, "users", state.address.toLowerCase(), p)
-      );
-      console.log(`subcollection "${p}":`, snap.docs.length, "docs");
-      if (snap.docs.length > 0) {
-        console.log("  Sample doc:", snap.docs[0].id, snap.docs[0].data());
-      }
-    } catch (e) {
-      console.log(`subcollection "${p}": error`, e);
-    }
+    // Thử range rộng hơn — 50000 blocks
+    const fromBlock2 = Math.max(0, latest - 50000);
+    const sentLogs2 = await rpc.getLogs({
+      address: ARC.contracts.USDC,
+      topics: [transferTopic, userTopic, null],
+      fromBlock: fromBlock2,
+      toBlock: latest,
+    });
+    console.log("USDC sent logs (50k blocks):", sentLogs2.length);
+
+    const recvLogs2 = await rpc.getLogs({
+      address: ARC.contracts.USDC,
+      topics: [transferTopic, null, userTopic],
+      fromBlock: fromBlock2,
+      toBlock: latest,
+    });
+    console.log("USDC recv logs (50k blocks):", recvLogs2.length);
+
+  } catch (e) {
+    console.error("Chain fetch error:", e);
   }
-
-  // Check xem address có uppercase hay không
-  const addrVariants = [
-    state.address.toLowerCase(),
-    state.address,
-    state.address.toUpperCase(),
-  ];
-
-  for (const addr of addrVariants) {
-    try {
-      const snap = await getDocs(
-        collection(db, "users", addr, "history")
-      );
-      console.log(`users/${addr}/history:`, snap.docs.length, "docs");
-    } catch (e) {
-      console.log(`users/${addr}/history: error`);
-    }
-  }
-
   console.log("=== END ===");
 }
-(window as any).debugFindHistory = debugFindHistory;
+(window as any).debugChainFetch = debugChainFetch;
 
 // ── Firestore helpers ──────────────────────────────────────
 // Fix #17: LUÔN filter ownerAddress — không fallback không-filter nữa
