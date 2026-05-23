@@ -421,7 +421,6 @@ async function connectWallet() {
     return;
   }
   try {
-    // 1. Request accounts TRƯỚC — trigger popup ví
     const rawAccounts: string[] = await window.ethereum.request({
       method: "eth_requestAccounts",
     });
@@ -429,21 +428,21 @@ async function connectWallet() {
 
     lsClearDisconnected();
 
-    // 2. Init provider/signer NGAY SAU khi có accounts (trước ensureArcNetwork)
     state.address = rawAccounts[0];
     state.provider = new ethers.BrowserProvider(window.ethereum as any);
     state.signer = await state.provider.getSigner();
 
-    // 3. Sau đó mới switch network
     await ensureArcNetwork();
 
-    // 4. Re-init lại provider/signer sau switch network (OKX cần bước này)
     state.provider = new ethers.BrowserProvider(window.ethereum as any);
     state.signer = await state.provider.getSigner();
 
     await refreshBalances();
     await loadUserData();
     lsSaveWallet();
+
+    // Load history sau khi có address
+    await loadHistoryHome();
 
     updateWalletUI();
     renderContacts();
@@ -1839,7 +1838,7 @@ async function doSplitBill() {
     <div class="card-inner mb-12"><div class="text-xs text-muted mb-4">Total</div><div class="fw700 mono">${sanitize(total)} USDC</div></div>
     <div class="card-inner mb-12"><div class="text-xs text-muted mb-4">Per Person</div><div class="fw700 mono" style="color:var(--p2)">${sanitize(each)} USDC</div></div>
     <div class="card-inner mb-12"><div class="text-xs text-muted mb-4">Participants</div><div class="fw700">${checked.length} people</div></div>
-    ${realParticipants.length ? `<div class="card-inner mb-16"><div class="text-xs text-muted mb-4">Đã thông báo</div><div class="fw600 text-sm">${realParticipants.map((c) => sanitize(c.name)).join(", ")}</div></div>` : ""}
+    ${realParticipants.length ? `<div class="card-inner mb-16"><div class="text-xs text-muted mb-4">Announced</div><div class="fw600 text-sm">${realParticipants.map((c) => sanitize(c.name)).join(", ")}</div></div>` : ""}
     <button class="btn btn-secondary btn-full" onclick="closeModal()">Done</button>`
   );
 }
@@ -1895,7 +1894,7 @@ function renderSplitHistory() {
         <div class="tx-meta">
           <div class="tx-addr fw600">${sanitize(b.desc)}</div>
           <div class="tx-msg text-xs text-muted">
-            Từ <span class="fw600" style="color:var(--p2)">${fromName}</span>
+            From <span class="fw600" style="color:var(--p2)">${fromName}</span>
             · <span class="fw600" style="color:${iMePaid ? "var(--green)" : "var(--red)"}">${iMePaid ? "Paid" : "Payment required"} ${sanitize(b.each)} USDC</span>
           </div>
           <div class="tx-time">${fmtDate(b.ts)}</div>
@@ -2016,8 +2015,8 @@ async function payBackSplit(
   if (!requireWallet()) return;
 
   const confirmed = await Swal.fire({
-    title: `Trả ${amount} USDC?`,
-    text: `Cho: ${desc}`,
+    title: `Paid ${amount} USDC?`,
+    text: `To: ${desc}`,
     icon: "question",
     showCancelButton: true,
     confirmButtonText: "Comfirm",
@@ -2189,6 +2188,31 @@ async function loadHistory(): Promise<void> {
 }
 (window as any).loadHistory = loadHistory;
 
+async function backfillHistoryOwner(): Promise<void> {
+  if (!state.address) return;
+  try {
+    const snap = await getDocs(userCol("history"));
+    const needsFix = snap.docs.filter((d) => !d.data().ownerAddress);
+    if (!needsFix.length) return;
+    const CHUNK = 400;
+    for (let i = 0; i < needsFix.length; i += CHUNK) {
+      const batch = writeBatch(db);
+      needsFix.slice(i, i + CHUNK).forEach((d) => {
+        batch.set(
+          d.ref,
+          { ownerAddress: state.address!.toLowerCase(), updatedAt: Date.now() },
+          { merge: true },
+        );
+      });
+      await batch.commit();
+    }
+    console.log(`Backfilled ${needsFix.length} history docs`);
+  } catch (e) {
+    console.error("backfillHistoryOwner error", e);
+  }
+}
+(window as any).backfillHistoryOwner = backfillHistoryOwner;
+
 async function loadHistoryHome(): Promise<void> {
   if (!state.address) return;
   const btn = document.getElementById(
@@ -2196,6 +2220,9 @@ async function loadHistoryHome(): Promise<void> {
   ) as HTMLButtonElement | null;
   setLoading(btn, true, "Loading…");
   try {
+    // Patch doc cũ thiếu ownerAddress trước khi query
+    await backfillHistoryOwner();
+
     const cached = await fbLoadAll("history");
     if (cached.length > 0) {
       state.history = dedupeHistory(cached);
