@@ -2221,34 +2221,16 @@ async function getLogsChunked(
 
 async function loadHistory(): Promise<void> {
   if (!requireWallet()) return;
-  const btn = document.getElementById(
-    "load-history-btn",
-  ) as HTMLButtonElement | null;
+  const btn = document.getElementById("load-history-btn") as HTMLButtonElement | null;
   setLoading(btn, true, "Loading…");
   try {
-    const chainResults = await fetchChainHistory();
-
-    const existingKeys = new Set(
-      state.history.map((h) => `${h.hash}-${h.type}-${h.token}`),
-    );
-    const newTxs = chainResults.filter(
-      (t) => !existingKeys.has(`${t.hash}-${t.type}-${t.token}`),
-    );
-
-    if (newTxs.length > 0) {
-      await persistHistoryToFirestore(newTxs);
-    }
-
-    state.history = dedupeHistory([...chainResults, ...state.history]);
+    const cached = await fbLoadAll("history");
+    state.history = dedupeHistory(cached);
     renderHistory();
     renderHomeTx();
     updateHistoryStats();
     buildAnalytics();
-
-    toast(
-      "success",
-      `Loaded ${chainResults.length} transactions${newTxs.length ? ` · ${newTxs.length} new` : ""}`,
-    );
+    toast("success", `Loaded ${cached.length} transactions`);
   } catch (e: unknown) {
     toast("error", e instanceof Error ? e.message : "Failed to load history");
   } finally {
@@ -2284,44 +2266,15 @@ async function backfillHistoryOwner(): Promise<void> {
 
 async function loadHistoryHome(): Promise<void> {
   if (!state.address) return;
-  const btn = document.getElementById(
-    "load-history-btn",
-  ) as HTMLButtonElement | null;
+  const btn = document.getElementById("load-history-btn") as HTMLButtonElement | null;
   setLoading(btn, true, "Loading…");
   try {
-    // Patch doc cũ thiếu ownerAddress trước khi query
-    await backfillHistoryOwner();
-
     const cached = await fbLoadAll("history");
-    if (cached.length > 0) {
-      state.history = dedupeHistory(cached);
-      renderHistory();
-      renderHomeTx();
-      updateHistoryStats();
-    }
-
-    const chainResults = await fetchChainHistory();
-    if (!chainResults.length) return;
-
-    const existingKeys = new Set(
-      state.history.map((h) => `${h.hash}-${h.type}-${h.token}`),
-    );
-    const newTxs = chainResults.filter(
-      (t) => !existingKeys.has(`${t.hash}-${t.type}-${t.token}`),
-    );
-
-    if (newTxs.length > 0) {
-      await persistHistoryToFirestore(newTxs);
-    }
-
-    state.history = dedupeHistory([...chainResults, ...state.history]);
+    state.history = dedupeHistory(cached);
     renderHistory();
     renderHomeTx();
     updateHistoryStats();
-
-    if (newTxs.length > 0) {
-      toast("info", `${newTxs.length} new transaction(s) synced`);
-    }
+    buildAnalytics();
   } catch (e) {
     console.error("loadHistoryHome error", e);
   } finally {
