@@ -2164,6 +2164,8 @@ async function addToHistory(tx: TxHistory) {
   const docId = tx.hash
     ? `${tx.hash.replace(/[^a-zA-Z0-9]/g, "")}_${tx.type}_${tx.token}`
     : `tx_${tx.ts}_${Math.random().toString(36).slice(2)}`;
+
+  // ── 1. Lưu cho ví hiện tại (sender) ──────────────────────
   try {
     await setDoc(
       doc(db, "users", state.address.toLowerCase(), "history", docId),
@@ -2189,6 +2191,35 @@ async function addToHistory(tx: TxHistory) {
     state.history.unshift(tx);
     renderHomeTx();
     renderHistory();
+  }
+
+  // ── 2. Lưu cho ví đối phương (receiver) ──────────────────
+  // Chỉ áp dụng khi tx.type === "sent" và có địa chỉ nhận hợp lệ
+  if (tx.type === "sent" && tx.to && ethers.isAddress(tx.to)) {
+    const receiverAddr = tx.to.toLowerCase();
+    const receiverDocId = tx.hash
+      ? `${tx.hash.replace(/[^a-zA-Z0-9]/g, "")}_received_${tx.token}`
+      : `tx_${tx.ts}_recv_${Math.random().toString(36).slice(2)}`;
+
+    const receiverTx: TxHistory = {
+      ...tx,
+      type: "received",
+      ownerAddress: receiverAddr,
+    };
+
+    try {
+      await setDoc(
+        doc(db, "users", receiverAddr, "history", receiverDocId),
+        {
+          ...receiverTx,
+          ownerAddress: receiverAddr,
+          updatedAt: Date.now(),
+        },
+        { merge: true },
+      );
+    } catch (e) {
+      console.error("addToHistory receiver error", e);
+    }
   }
 }
 (window as any).addToHistory = addToHistory;
