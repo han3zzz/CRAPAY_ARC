@@ -2362,9 +2362,7 @@ async function fetchChainHistory(): Promise<TxHistory[]> {
   const rpc = new ethers.JsonRpcProvider(ARC.rpc);
   const latest = await rpc.getBlockNumber();
 
-  // Quét 100,000 blocks (~vài ngày) chia thành chunk 8,000 mỗi lần
   const RANGE = 100000;
-  const CHUNK = 8000;
   const fromBlock = Math.max(0, latest - RANGE);
 
   const results: TxHistory[] = [];
@@ -2373,24 +2371,31 @@ async function fetchChainHistory(): Promise<TxHistory[]> {
   const user = ethers.getAddress(state.address);
   const userTopic = ethers.zeroPadValue(user, 32);
 
+  // Cache block timestamp để tránh gọi RPC quá nhiều
+  const blockTimes = new Map<number, number>();
+  async function getBlockTime(n: number): Promise<number> {
+    if (blockTimes.has(n)) return blockTimes.get(n)!;
+    const b = await rpc.getBlock(n).catch(() => null);
+    const t = b ? Number(b.timestamp) * 1000 : Date.now();
+    blockTimes.set(n, t);
+    return t;
+  }
+
   for (const token of ["USDC", "EURC"] as const) {
     const addr = token === "USDC" ? ARC.contracts.USDC : ARC.contracts.EURC;
     const contract = new ethers.Contract(addr, ERC20_ABI, rpc);
     const dec = Number(await contract.decimals().catch(() => 6));
 
-    // Chia range thành nhiều chunk 8,000 blocks
     const sentLogs = await getLogsChunked(
       rpc,
       { address: addr, topics: [transferTopic, userTopic, null] },
-      fromBlock,
-      latest,
+      fromBlock, latest,
     );
 
     const recvLogs = await getLogsChunked(
       rpc,
       { address: addr, topics: [transferTopic, null, userTopic] },
-      fromBlock,
-      latest,
+      fromBlock, latest,
     );
 
     for (const log of sentLogs) {
@@ -2398,6 +2403,7 @@ async function fetchChainHistory(): Promise<TxHistory[]> {
       if (!parsed) continue;
       const fromAddr: string = parsed.args[0];
       const toAddr: string = parsed.args[1];
+      if (fromAddr.toLowerCase() !== user.toLowerCase()) continue; // ← FIX BUG 1
       if (fromAddr.toLowerCase() === toAddr.toLowerCase()) continue;
       results.push({
         hash: log.transactionHash,
@@ -2407,7 +2413,7 @@ async function fetchChainHistory(): Promise<TxHistory[]> {
         token,
         type: "sent",
         blockNumber: log.blockNumber,
-        ts: Date.now(),
+        ts: await getBlockTime(log.blockNumber), // ← FIX BUG 2
       });
     }
 
@@ -2426,23 +2432,21 @@ async function fetchChainHistory(): Promise<TxHistory[]> {
         token,
         type: "received",
         blockNumber: log.blockNumber,
-        ts: Date.now(),
+        ts: await getBlockTime(log.blockNumber), // ← FIX BUG 2
       });
     }
   }
 
   const seen = new Set<string>();
-  const deduped = results.filter((t) => {
-    const key = `${t.hash}-${t.type}-${t.token}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-
-  deduped.sort((a, b) => (b.blockNumber ?? 0) - (a.blockNumber ?? 0));
-  return deduped;
+  return results
+    .filter((t) => {
+      const key = `${t.hash}-${t.type}-${t.token}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => (b.blockNumber ?? 0) - (a.blockNumber ?? 0));
 }
-
 // Fix #9: ownerAddress added to every history doc
 async function persistHistoryToFirestore(txs: TxHistory[]): Promise<void> {
   if (!state.address || !txs.length) return;
