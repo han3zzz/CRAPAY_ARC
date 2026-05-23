@@ -614,10 +614,8 @@ window.addEventListener("load", async () => {
     return;
   }
 
-  // ── FIX: nếu user đã chủ động disconnect thì KHÔNG auto-reconnect ──
   if (lsIsDisconnected()) {
     isBooting = false;
-    // Reset UI về trạng thái chưa connect
     state.address = null;
     state.usdcBal = "0.00";
     state.eurcBal = "0.00";
@@ -635,18 +633,22 @@ window.addEventListener("load", async () => {
     state.signer = null;
     updateWalletUI();
 
-    refreshBalances().catch(console.error);
-    loadUserData()
-      .then(() => {
-        lsSaveWallet();
-        updateWalletUI();
-        await clearHistoryCache(); // xóa cache cũ
-        loadHistoryHome();
-        renderHomeTx();
-        renderHistory();
-        buildAnalytics();
-      })
-      .catch(console.error);
+    try {
+      await refreshBalances();
+      await loadUserData();
+      lsSaveWallet();
+      updateWalletUI();
+
+      // Xóa cache cũ (docId sai) rồi mới fetch lại
+      await clearHistoryCache();
+      await loadHistoryHome();
+
+      renderHomeTx();
+      renderHistory();
+      buildAnalytics();
+    } catch (e) {
+      console.error("Auto-reconnect error", e);
+    }
   }
 
   window.ethereum.on?.(
@@ -675,6 +677,9 @@ window.addEventListener("load", async () => {
       lsSaveWallet();
       updateWalletUI();
 
+      await clearHistoryCache();
+      await loadHistoryHome();
+
       renderContacts();
       renderSchedules();
       renderHomeSchedule();
@@ -685,7 +690,6 @@ window.addEventListener("load", async () => {
       renderSplitHistory();
       renderHistory();
       updateContactDatalist();
-      loadHistoryHome().catch(console.error);
 
       toast("info", `Switched to ${shortAddr(newAccounts[0])}`);
     },
