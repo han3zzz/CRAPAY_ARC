@@ -570,6 +570,10 @@ a:hover {
   background: rgba(34, 217, 138, 0.1);
   color: var(--green);
 }
+.tx-icon.received {
+    background: rgba(34, 217, 138, 0.1);
+  color: var(--green);
+}
 .tx-icon.sent {
   background: rgba(255, 92, 122, 0.1);
   color: var(--red);
