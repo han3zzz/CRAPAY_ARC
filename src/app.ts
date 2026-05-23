@@ -149,6 +149,39 @@ function lsClearWallet(): void {
   localStorage.removeItem(LS_WALLET_KEY);
 }
 
+async function debugHistory(): Promise<void> {
+  if (!state.address) {
+    console.log("No address");
+    return;
+  }
+  console.log("=== DEBUG HISTORY ===");
+  console.log("Address:", state.address.toLowerCase());
+
+  // Check 1: đọc raw không filter
+  try {
+    const rawSnap = await getDocs(userCol("history"));
+    console.log("Raw docs in subcollection:", rawSnap.docs.length);
+    rawSnap.docs.slice(0, 3).forEach((d) => {
+      console.log("Doc ID:", d.id, "| ownerAddress:", d.data().ownerAddress, "| type:", d.data().type, "| amount:", d.data().amount);
+    });
+  } catch (e) {
+    console.error("Raw read error:", e);
+  }
+
+  // Check 2: đọc với filter ownerAddress
+  try {
+    const filtered = await fbLoadAll("history");
+    console.log("Filtered by ownerAddress:", filtered.length);
+  } catch (e) {
+    console.error("Filtered read error:", e);
+  }
+
+  // Check 3: state hiện tại
+  console.log("state.history.length:", state.history.length);
+  console.log("=== END DEBUG ===");
+}
+(window as any).debugHistory = debugHistory;
+
 // ── Firestore helpers ──────────────────────────────────────
 // Fix #17: LUÔN filter ownerAddress — không fallback không-filter nữa
 // (path đã scoped theo address rồi, ownerAddress là lớp bảo vệ thứ 2)
