@@ -1938,7 +1938,7 @@ function showSplitDetail(billId: string | number) {
             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
               ${
                 p.paid
-                  ? `<span class="tag tag-green">Đã trả</span>
+                  ? `<span class="tag tag-green">Paid</span>
                      ${p.txHash ? `<a href="${ARC.explorer}/tx/${p.txHash}" target="_blank" class="mono text-xs" style="color:var(--text3)">${shortHash(p.txHash)}</a>` : ""}`
                   : isMe && !isOwner
                   ? `<button class="btn btn-primary btn-sm" style="font-size:11px"
