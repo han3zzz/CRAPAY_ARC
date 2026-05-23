@@ -674,7 +674,6 @@ window.addEventListener("load", async () => {
       lsSaveWallet();
       updateWalletUI();
 
-      await clearHistoryCache();
       await loadHistoryHome();
 
       renderContacts();
@@ -2098,7 +2097,6 @@ async function payBackSplit(
 // Fix #14: write to Firestore FIRST, then update state
 async function addToHistory(tx: TxHistory) {
   if (!state.address) return;
-  // Dùng hash+type+token để sent/received không ghi đè nhau
   const docId = tx.hash
     ? `${tx.hash.replace(/[^a-zA-Z0-9]/g, "")}_${tx.type}_${tx.token}`
     : `tx_${tx.ts}_${Math.random().toString(36).slice(2)}`;
@@ -2112,7 +2110,14 @@ async function addToHistory(tx: TxHistory) {
       },
       { merge: true },
     );
-    state.history.unshift(tx);
+    const key = `${tx.hash}-${tx.type}-${tx.token}`;
+    const exists = state.history.some(
+      (h) => `${h.hash}-${h.type}-${h.token}` === key,
+    );
+    if (!exists) {
+      state.history.unshift(tx);
+      updateHistoryStats();
+    }
     renderHomeTx();
     renderHistory();
   } catch (e) {
@@ -2124,23 +2129,6 @@ async function addToHistory(tx: TxHistory) {
 }
 (window as any).addToHistory = addToHistory;
 
-async function clearHistoryCache(): Promise<void> {
-  if (!state.address) return;
-  try {
-    const snap = await getDocs(userCol("history"));
-    if (!snap.docs.length) return;
-    const CHUNK = 400;
-    for (let i = 0; i < snap.docs.length; i += CHUNK) {
-      const batch = writeBatch(db);
-      snap.docs.slice(i, i + CHUNK).forEach((d) => batch.delete(d.ref));
-      await batch.commit();
-    }
-    console.log("History cache cleared");
-  } catch (e) {
-    console.error("clearHistoryCache error", e);
-  }
-}
-(window as any).clearHistoryCache = clearHistoryCache;
 
 async function getLogsChunked(
   provider: ethers.JsonRpcProvider,
@@ -2170,20 +2158,29 @@ async function loadHistory(): Promise<void> {
   ) as HTMLButtonElement | null;
   setLoading(btn, true, "Loading…");
   try {
-    const results = await fetchChainHistory();
-    state.history = results;
-    await persistHistoryToFirestore(results);
+    const chainResults = await fetchChainHistory();
+
+    const existingKeys = new Set(
+      state.history.map((h) => `${h.hash}-${h.type}-${h.token}`),
+    );
+    const newTxs = chainResults.filter(
+      (t) => !existingKeys.has(`${t.hash}-${t.type}-${t.token}`),
+    );
+
+    if (newTxs.length > 0) {
+      await persistHistoryToFirestore(newTxs);
+    }
+
+    state.history = dedupeHistory([...chainResults, ...state.history]);
     renderHistory();
     renderHomeTx();
-    const sent = results
-      .filter((t) => t.type === "sent")
-      .reduce((s, t) => s + parseFloat(t.amount), 0);
-    const recv = results
-      .filter((t) => t.type === "received")
-      .reduce((s, t) => s + parseFloat(t.amount), 0);
-    setText("home-sent", sent.toFixed(2) + " USDC");
-    setText("home-recv", recv.toFixed(2) + " USDC");
-    toast("success", `Loaded ${results.length} transactions`);
+    updateHistoryStats();
+    buildAnalytics();
+
+    toast(
+      "success",
+      `Loaded ${chainResults.length} transactions${newTxs.length ? ` · ${newTxs.length} new` : ""}`,
+    );
   } catch (e: unknown) {
     toast("error", e instanceof Error ? e.message : "Failed to load history");
   } finally {
@@ -2201,44 +2198,34 @@ async function loadHistoryHome(): Promise<void> {
   try {
     const cached = await fbLoadAll("history");
     if (cached.length > 0) {
-      // Dedup cache theo hash+type
-      const seen = new Set<string>();
-      const deduped = cached.filter((t: TxHistory) => {
-        const key = `${t.hash}-${t.type}-${t.token}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-      state.history = deduped.sort(
-        (a: TxHistory, b: TxHistory) =>
-          (b.blockNumber ?? b.ts ?? 0) - (a.blockNumber ?? a.ts ?? 0),
-      );
+      state.history = dedupeHistory(cached);
       renderHistory();
       renderHomeTx();
-      const sent = state.history
-        .filter((t) => t.type === "sent")
-        .reduce((s, t) => s + parseFloat(t.amount), 0);
-      const recv = state.history
-        .filter((t) => t.type === "received")
-        .reduce((s, t) => s + parseFloat(t.amount), 0);
-      setText("home-sent", sent.toFixed(2) + " USDC");
-      setText("home-recv", recv.toFixed(2) + " USDC");
-      return;
+      updateHistoryStats();
     }
-    // Không có cache → fetch từ chain
-    const results = await fetchChainHistory();
-    state.history = results;
-    await persistHistoryToFirestore(results);
+
+    const chainResults = await fetchChainHistory();
+    if (!chainResults.length) return;
+
+    const existingKeys = new Set(
+      state.history.map((h) => `${h.hash}-${h.type}-${h.token}`),
+    );
+    const newTxs = chainResults.filter(
+      (t) => !existingKeys.has(`${t.hash}-${t.type}-${t.token}`),
+    );
+
+    if (newTxs.length > 0) {
+      await persistHistoryToFirestore(newTxs);
+    }
+
+    state.history = dedupeHistory([...chainResults, ...state.history]);
     renderHistory();
     renderHomeTx();
-    const sent = results
-      .filter((t) => t.type === "sent")
-      .reduce((s, t) => s + parseFloat(t.amount), 0);
-    const recv = results
-      .filter((t) => t.type === "received")
-      .reduce((s, t) => s + parseFloat(t.amount), 0);
-    setText("home-sent", sent.toFixed(2) + " USDC");
-    setText("home-recv", recv.toFixed(2) + " USDC");
+    updateHistoryStats();
+
+    if (newTxs.length > 0) {
+      toast("info", `${newTxs.length} new transaction(s) synced`);
+    }
   } catch (e) {
     console.error("loadHistoryHome error", e);
   } finally {
@@ -2246,6 +2233,33 @@ async function loadHistoryHome(): Promise<void> {
   }
 }
 (window as any).loadHistoryHome = loadHistoryHome;
+
+function dedupeHistory(txs: TxHistory[]): TxHistory[] {
+  const seen = new Set<string>();
+  return txs
+    .filter((t) => {
+      const key = `${t.hash}-${t.type}-${t.token}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort(
+      (a, b) => (b.blockNumber ?? b.ts ?? 0) - (a.blockNumber ?? a.ts ?? 0),
+    );
+}
+(window as any).dedupeHistory = dedupeHistory;
+
+function updateHistoryStats(): void {
+  const sent = state.history
+    .filter((t) => t.type === "sent")
+    .reduce((s, t) => s + parseFloat(t.amount), 0);
+  const recv = state.history
+    .filter((t) => t.type === "received")
+    .reduce((s, t) => s + parseFloat(t.amount), 0);
+  setText("home-sent", sent.toFixed(2) + " USDC");
+  setText("home-recv", recv.toFixed(2) + " USDC");
+}
+(window as any).updateHistoryStats = updateHistoryStats;
 
 async function fetchChainHistory(): Promise<TxHistory[]> {
   if (!state.address) throw new Error("Wallet not connected");
@@ -2341,7 +2355,6 @@ async function persistHistoryToFirestore(txs: TxHistory[]): Promise<void> {
   for (let i = 0; i < txs.length; i += CHUNK) {
     const batch = writeBatch(db);
     for (const tx of txs.slice(i, i + CHUNK)) {
-      // Key = hash + type + token → sent/received cùng hash không ghi đè nhau
       const docId = tx.hash
         ? `${tx.hash.replace(/[^a-zA-Z0-9]/g, "")}_${tx.type}_${tx.token}`
         : `tx_${tx.ts}_${Math.random().toString(36).slice(2)}`;
