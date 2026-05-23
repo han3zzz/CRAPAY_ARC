@@ -443,7 +443,6 @@ async function connectWallet() {
 
     await refreshBalances();
     await loadUserData();
-    await clearHistoryCache();
     lsSaveWallet();
 
     updateWalletUI();
@@ -639,8 +638,6 @@ window.addEventListener("load", async () => {
       lsSaveWallet();
       updateWalletUI();
 
-      // Xóa cache cũ (docId sai) rồi mới fetch lại
-      await clearHistoryCache();
       await loadHistoryHome();
 
       renderHomeTx();
