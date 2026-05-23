@@ -443,6 +443,7 @@ async function connectWallet() {
 
     await refreshBalances();
     await loadUserData();
+    await clearHistoryCache();
     lsSaveWallet();
 
     updateWalletUI();
@@ -639,6 +640,7 @@ window.addEventListener("load", async () => {
       .then(() => {
         lsSaveWallet();
         updateWalletUI();
+        await clearHistoryCache(); // xóa cache cũ
         loadHistoryHome();
         renderHomeTx();
         renderHistory();
@@ -2095,8 +2097,9 @@ async function payBackSplit(
 // Fix #14: write to Firestore FIRST, then update state
 async function addToHistory(tx: TxHistory) {
   if (!state.address) return;
+  // Dùng hash+type+token để sent/received không ghi đè nhau
   const docId = tx.hash
-    ? tx.hash.replace(/[^a-zA-Z0-9]/g, "")
+    ? `${tx.hash.replace(/[^a-zA-Z0-9]/g, "")}_${tx.type}_${tx.token}`
     : `tx_${tx.ts}_${Math.random().toString(36).slice(2)}`;
   try {
     await setDoc(
@@ -2108,19 +2111,35 @@ async function addToHistory(tx: TxHistory) {
       },
       { merge: true },
     );
-    // Only update state after successful write
     state.history.unshift(tx);
     renderHomeTx();
     renderHistory();
   } catch (e) {
     console.error("addToHistory error", e);
-    // Still update in-memory state so UI isn't blank
     state.history.unshift(tx);
     renderHomeTx();
     renderHistory();
   }
 }
 (window as any).addToHistory = addToHistory;
+
+async function clearHistoryCache(): Promise<void> {
+  if (!state.address) return;
+  try {
+    const snap = await getDocs(userCol("history"));
+    if (!snap.docs.length) return;
+    const CHUNK = 400;
+    for (let i = 0; i < snap.docs.length; i += CHUNK) {
+      const batch = writeBatch(db);
+      snap.docs.slice(i, i + CHUNK).forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    }
+    console.log("History cache cleared");
+  } catch (e) {
+    console.error("clearHistoryCache error", e);
+  }
+}
+(window as any).clearHistoryCache = clearHistoryCache;
 
 async function getLogsChunked(
   provider: ethers.JsonRpcProvider,
@@ -2179,11 +2198,19 @@ async function loadHistoryHome(): Promise<void> {
   ) as HTMLButtonElement | null;
   setLoading(btn, true, "Loading…");
   try {
-    // Fix #9: fbLoadAll now always filters by ownerAddress
     const cached = await fbLoadAll("history");
     if (cached.length > 0) {
-      state.history = cached.sort(
-        (a, b) => (b.blockNumber ?? b.ts ?? 0) - (a.blockNumber ?? a.ts ?? 0),
+      // Dedup cache theo hash+type
+      const seen = new Set<string>();
+      const deduped = cached.filter((t: TxHistory) => {
+        const key = `${t.hash}-${t.type}-${t.token}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      state.history = deduped.sort(
+        (a: TxHistory, b: TxHistory) =>
+          (b.blockNumber ?? b.ts ?? 0) - (a.blockNumber ?? a.ts ?? 0),
       );
       renderHistory();
       renderHomeTx();
@@ -2197,6 +2224,7 @@ async function loadHistoryHome(): Promise<void> {
       setText("home-recv", recv.toFixed(2) + " USDC");
       return;
     }
+    // Không có cache → fetch từ chain
     const results = await fetchChainHistory();
     state.history = results;
     await persistHistoryToFirestore(results);
@@ -2226,6 +2254,8 @@ async function fetchChainHistory(): Promise<TxHistory[]> {
   const results: TxHistory[] = [];
   const iface = new ethers.Interface(ERC20_ABI);
   const transferTopic = iface.getEvent("Transfer")!.topicHash;
+
+  // Dùng getAddress để normalize checksum
   const user = ethers.getAddress(state.address);
   const userTopic = ethers.zeroPadValue(user, 32);
 
@@ -2234,28 +2264,33 @@ async function fetchChainHistory(): Promise<TxHistory[]> {
     const contract = new ethers.Contract(addr, ERC20_ABI, rpc);
     const dec = Number(await contract.decimals().catch(() => 6));
 
-    const [sentLogs, recvLogs] = await Promise.all([
-      getLogsChunked(
-        rpc,
-        { address: addr, topics: [transferTopic, userTopic] },
-        fromBlock,
-        latest,
-      ),
-      getLogsChunked(
-        rpc,
-        { address: addr, topics: [transferTopic, null, userTopic] },
-        fromBlock,
-        latest,
-      ),
-    ]);
+    // topic[1] = from (sent by me)
+    const sentLogs = await getLogsChunked(
+      rpc,
+      { address: addr, topics: [transferTopic, userTopic, null] },
+      fromBlock,
+      latest,
+    );
+
+    // topic[2] = to (received by me)
+    const recvLogs = await getLogsChunked(
+      rpc,
+      { address: addr, topics: [transferTopic, null, userTopic] },
+      fromBlock,
+      latest,
+    );
 
     for (const log of sentLogs) {
-      const parsed = iface.parseLog(log);
+      const parsed = iface.parseLog({ topics: [...log.topics], data: log.data });
       if (!parsed) continue;
+      const fromAddr: string = parsed.args[0];
+      const toAddr: string = parsed.args[1];
+      // Bỏ qua self-transfer
+      if (fromAddr.toLowerCase() === toAddr.toLowerCase()) continue;
       results.push({
         hash: log.transactionHash,
-        from: parsed.args[0],
-        to: parsed.args[1],
+        from: fromAddr,
+        to: toAddr,
         amount: Number(ethers.formatUnits(parsed.args[2], dec)).toFixed(2),
         token,
         type: "sent",
@@ -2263,13 +2298,19 @@ async function fetchChainHistory(): Promise<TxHistory[]> {
         ts: Date.now(),
       });
     }
+
     for (const log of recvLogs) {
-      const parsed = iface.parseLog(log);
+      const parsed = iface.parseLog({ topics: [...log.topics], data: log.data });
       if (!parsed) continue;
+      const fromAddr: string = parsed.args[0];
+      const toAddr: string = parsed.args[1];
+      // Bỏ qua self-transfer và bỏ qua nếu mình cũng là sender
+      if (fromAddr.toLowerCase() === toAddr.toLowerCase()) continue;
+      if (fromAddr.toLowerCase() === user.toLowerCase()) continue;
       results.push({
         hash: log.transactionHash,
-        from: parsed.args[0],
-        to: parsed.args[1],
+        from: fromAddr,
+        to: toAddr,
         amount: Number(ethers.formatUnits(parsed.args[2], dec)).toFixed(2),
         token,
         type: "received",
@@ -2278,8 +2319,18 @@ async function fetchChainHistory(): Promise<TxHistory[]> {
       });
     }
   }
-  results.sort((a, b) => (b.blockNumber ?? 0) - (a.blockNumber ?? 0));
-  return results;
+
+  // Dedup: cùng hash + type chỉ giữ 1
+  const seen = new Set<string>();
+  const deduped = results.filter((t) => {
+    const key = `${t.hash}-${t.type}-${t.token}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  deduped.sort((a, b) => (b.blockNumber ?? 0) - (a.blockNumber ?? 0));
+  return deduped;
 }
 
 // Fix #9: ownerAddress added to every history doc
@@ -2289,8 +2340,9 @@ async function persistHistoryToFirestore(txs: TxHistory[]): Promise<void> {
   for (let i = 0; i < txs.length; i += CHUNK) {
     const batch = writeBatch(db);
     for (const tx of txs.slice(i, i + CHUNK)) {
+      // Key = hash + type + token → sent/received cùng hash không ghi đè nhau
       const docId = tx.hash
-        ? tx.hash.replace(/[^a-zA-Z0-9]/g, "")
+        ? `${tx.hash.replace(/[^a-zA-Z0-9]/g, "")}_${tx.type}_${tx.token}`
         : `tx_${tx.ts}_${Math.random().toString(36).slice(2)}`;
       const ref = doc(
         db,
