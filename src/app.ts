@@ -2200,16 +2200,20 @@ async function getLogsChunked(
   fromBlock: number,
   latest: number,
 ): Promise<ethers.Log[]> {
-  const step = 8000;
+  const CHUNK = 8000;
   const all: ethers.Log[] = [];
-  for (let start = fromBlock; start <= latest; start += step) {
-    const end = Math.min(start + step - 1, latest);
-    const logs = await provider.getLogs({
-      ...filter,
-      fromBlock: start,
-      toBlock: end,
-    });
-    all.push(...logs);
+  for (let start = fromBlock; start <= latest; start += CHUNK) {
+    const end = Math.min(start + CHUNK - 1, latest);
+    try {
+      const logs = await provider.getLogs({
+        ...filter,
+        fromBlock: start,
+        toBlock: end,
+      });
+      all.push(...logs);
+    } catch (e: any) {
+      console.warn(`getLogs chunk ${start}-${end} failed:`, e?.message);
+    }
   }
   return all;
 }
@@ -2357,12 +2361,15 @@ async function fetchChainHistory(): Promise<TxHistory[]> {
   if (!state.address) throw new Error("Wallet not connected");
   const rpc = new ethers.JsonRpcProvider(ARC.rpc);
   const latest = await rpc.getBlockNumber();
-  const fromBlock = Math.max(0, latest - 10000);
+
+  // Quét 100,000 blocks (~vài ngày) chia thành chunk 8,000 mỗi lần
+  const RANGE = 100000;
+  const CHUNK = 8000;
+  const fromBlock = Math.max(0, latest - RANGE);
+
   const results: TxHistory[] = [];
   const iface = new ethers.Interface(ERC20_ABI);
   const transferTopic = iface.getEvent("Transfer")!.topicHash;
-
-  // Dùng getAddress để normalize checksum
   const user = ethers.getAddress(state.address);
   const userTopic = ethers.zeroPadValue(user, 32);
 
@@ -2371,7 +2378,7 @@ async function fetchChainHistory(): Promise<TxHistory[]> {
     const contract = new ethers.Contract(addr, ERC20_ABI, rpc);
     const dec = Number(await contract.decimals().catch(() => 6));
 
-    // topic[1] = from (sent by me)
+    // Chia range thành nhiều chunk 8,000 blocks
     const sentLogs = await getLogsChunked(
       rpc,
       { address: addr, topics: [transferTopic, userTopic, null] },
@@ -2379,7 +2386,6 @@ async function fetchChainHistory(): Promise<TxHistory[]> {
       latest,
     );
 
-    // topic[2] = to (received by me)
     const recvLogs = await getLogsChunked(
       rpc,
       { address: addr, topics: [transferTopic, null, userTopic] },
@@ -2392,7 +2398,6 @@ async function fetchChainHistory(): Promise<TxHistory[]> {
       if (!parsed) continue;
       const fromAddr: string = parsed.args[0];
       const toAddr: string = parsed.args[1];
-      // Bỏ qua self-transfer
       if (fromAddr.toLowerCase() === toAddr.toLowerCase()) continue;
       results.push({
         hash: log.transactionHash,
@@ -2411,7 +2416,6 @@ async function fetchChainHistory(): Promise<TxHistory[]> {
       if (!parsed) continue;
       const fromAddr: string = parsed.args[0];
       const toAddr: string = parsed.args[1];
-      // Bỏ qua self-transfer và bỏ qua nếu mình cũng là sender
       if (fromAddr.toLowerCase() === toAddr.toLowerCase()) continue;
       if (fromAddr.toLowerCase() === user.toLowerCase()) continue;
       results.push({
@@ -2427,7 +2431,6 @@ async function fetchChainHistory(): Promise<TxHistory[]> {
     }
   }
 
-  // Dedup: cùng hash + type chỉ giữ 1
   const seen = new Set<string>();
   const deduped = results.filter((t) => {
     const key = `${t.hash}-${t.type}-${t.token}`;
