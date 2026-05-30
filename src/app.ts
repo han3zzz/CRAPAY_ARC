@@ -16,6 +16,15 @@ import {
   writeBatch,
 } from "firebase/firestore";
 
+import {
+  agenticPaymentWithUI,
+  executeAgenticPayment,
+  ensureAgenticApproval,
+  fetchJobsByAddress,
+  fetchJobsFromEvents,
+  type OnchainJob,
+} from './agenticPayment';
+
 // ── Types ──────────────────────────────────────────────────
 // Fix #10: EIP1193Provider từ viem không có .on() → tự declare
 interface EthereumProvider {
@@ -309,6 +318,8 @@ async function loadUserData(): Promise<void> {
     } else {
       state.notifications = notifications.sort((a, b) => b.time - a.time);
     }
+    // Sync agentic approval flag từ Firebase vào localStorage
+    await syncAgenticApprovalFromFb().catch(() => {});
   } catch (e) {
     console.error("loadUserData error", e);
   }
@@ -328,6 +339,7 @@ const PAGE_TITLES: Record<string, string> = {
   analytics: "Analytics",
   history: "History & Export",
   alerts: "Price Alerts",
+  agentic: "Agentic Payment",
 };
 
 function nav(id: string) {
@@ -376,7 +388,17 @@ function onPageLoad(id: string) {
     renderContacts();
     renderSplitParticipants();
   }
-  if (id === "schedule") renderSchedules();
+ if (id === "schedule") {
+  renderSchedules();
+  const dateEl = document.getElementById("sched-date") as HTMLInputElement | null;
+  if (dateEl) {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const iso = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
+    dateEl.min = iso;
+    dateEl.value = iso;
+  }
+}
   if (id === "paylink") {
     updateLinkPreview();
     renderLinks();
@@ -398,6 +420,7 @@ function onPageLoad(id: string) {
     updateSendBalances();
     updateContactDatalist();
   }
+  if (id === "agentic") initAgenticPage();
 }
 (window as any).onPageLoad = onPageLoad;
 
@@ -703,7 +726,7 @@ window.addEventListener("load", async () => {
       updateWalletUI();
 
       await loadHistoryHome();
-
+      renderHomeSchedule();
       renderHomeTx();
       renderHistory();
       buildAnalytics();
@@ -1481,7 +1504,34 @@ async function doAddSchedule() {
     return;
   }
 
-  const startTs = date ? new Date(date).getTime() : Date.now();
+
+const tomorrow = new Date();
+tomorrow.setDate(tomorrow.getDate() + 1);
+tomorrow.setHours(0, 0, 0, 0);
+const tomorrowTs = tomorrow.getTime();
+
+const selectedTs = date ? new Date(date).getTime() : 0;
+if (!date || selectedTs < tomorrowTs) {
+  toast("error", "Start date must be at least tomorrow");
+  return;
+}
+
+  // Xin approve Agentic 1 lần ngay khi tạo schedule
+  // → lúc runDueSchedules() chạy ngầm sẽ hoàn toàn tự động, không popup bất ngờ
+  try {
+    if (!state.signer) {
+      state.signer = await state.provider!.getSigner();
+    }
+    await ensureArcNetwork();
+    await ensureAgenticApprovalWithFb(state.signer);
+  } catch (e: any) {
+    // User huỷ approve → không tạo schedule
+    toast("error", e?.message?.includes("cancelled") ? "Approval cancelled — schedule not created" : (e?.message ?? "Approval failed"));
+    return;
+  }
+
+
+const startTs = date ? new Date(date).getTime() : tomorrow.getTime();
   const sched = {
     id: Date.now(),
     to,
@@ -1554,30 +1604,63 @@ async function runDueSchedules() {
   for (const s of state.schedules) {
     if (!s.active || s.nextRunAt > now) continue;
     try {
-      const tx = await sendOnChain(s.to, s.amount, s.token, s.msg);
+      // Đảm bảo có signer trước khi chạy
+      if (!state.signer) {
+        if (state.provider) {
+          try { state.signer = await state.provider.getSigner(); }
+          catch { console.warn("Schedule: cannot get signer, skipping", s.id); continue; }
+        } else {
+          console.warn("Schedule: no provider, skipping", s.id); continue;
+        }
+      }
+
+      await ensureArcNetwork();
+      // Sync approval từ Firebase → localStorage trước khi chạy
+      await syncAgenticApprovalFromFb();
+
+      const description = s.msg
+        ? `${s.msg} — Scheduled ${cap(s.freq)}`
+        : `Scheduled ${cap(s.freq)} payment via CRAPAY`;
+
+      const result = await executeAgenticPayment(state.signer, {
+        recipient: s.to,
+        amount: s.amount,
+        description,
+        expirySeconds: 86400,
+        onStep: (step) => console.log(`[Scheduled #${s.id}]`, step),
+      });
+
       s.lastRunAt = now;
-      s.lastTxHash = tx.hash;
+      s.lastTxHash = result.txHash;
+      s.lastJobId  = result.jobId;
       s.active = s.freq !== "once";
       if (s.active) s.nextRunAt = nextRunTime(s.freq, now);
+
       await fbSave("schedules", s);
-      await addToHistory({
-        hash: tx.hash,
+
+      const entry: TxHistory = {
+        hash: result.txHash,
         from: state.address,
         to: s.to,
         amount: s.amount,
-        token: s.token,
-        type: "sent",
-        msg: s.msg,
+        token: "USDC",
+        type: "agentic",
+        msg: `Job #${result.jobId} — ${description}`,
         ts: now,
-      });
+        ownerAddress: state.address.toLowerCase(),
+      };
+      state.history.unshift(entry);
+      await addToHistory(entry);
+
       await pushNotif(
-        `Scheduled: sent ${s.amount} ${s.token} to ${shortAddr(s.to)}`,
+        `⚡ Scheduled: sent ${s.amount} USDC to ${shortAddr(s.to)} (Job #${result.jobId})`,
       );
     } catch (e) {
       console.error("Schedule failed", e);
     }
   }
   renderSchedules();
+  renderAgenticHistory();
 }
 (window as any).runDueSchedules = runDueSchedules;
 
@@ -1669,6 +1752,16 @@ function showContact(id: number) {
   const c = state.contacts.find((x) => x.id === id);
   const det = document.getElementById("contact-detail-card");
   if (!c || !det) return;
+
+  // Tính từ state.history — không phụ thuộc field totalSent/totalReceived trong Firebase
+  const addr = c.address.toLowerCase();
+  const totalSent = state.history
+    .filter((h) => h.type === "sent" && h.to?.toLowerCase() === addr)
+    .reduce((sum, h) => sum + parseFloat(h.amount || "0"), 0);
+  const totalReceived = state.history
+    .filter((h) => h.type === "received" && h.from?.toLowerCase() === addr)
+    .reduce((sum, h) => sum + parseFloat(h.amount || "0"), 0);
+
   det.innerHTML = `
     <div class="section-title">Contact Detail</div>
     <div class="text-center" style="padding:20px 0 16px">
@@ -1676,8 +1769,8 @@ function showContact(id: number) {
       <div class="fw700" style="font-size:16px">${sanitize(c.name)}</div>
       <div class="text-muted text-xs mono mt-4">${sanitize(c.address)}</div>
     </div>
-    <div class="card-inner mb-8 flex justify-between"><span class="text-muted text-sm">Total Sent</span><span class="fw600 mono" style="color:var(--red)">-${(c.totalSent || 0).toFixed(2)} USDC</span></div>
-    <div class="card-inner mb-16 flex justify-between"><span class="text-muted text-sm">Total Received</span><span class="fw600 mono" style="color:var(--green)">+${(c.totalReceived || 0).toFixed(2)} USDC</span></div>
+    <div class="card-inner mb-8 flex justify-between"><span class="text-muted text-sm">Total Sent</span><span class="fw600 mono" style="color:var(--red)">-${totalSent.toFixed(2)} USDC</span></div>
+    <div class="card-inner mb-16 flex justify-between"><span class="text-muted text-sm">Total Received</span><span class="fw600 mono" style="color:var(--green)">+${totalReceived.toFixed(2)} USDC</span></div>
     <div class="flex gap-8">
       <button class="btn btn-primary" style="flex:1" data-addr="${sanitize(c.address)}" onclick="nav('send');(document.getElementById('send-to')).value=this.dataset.addr">Send</button>
       <button class="btn btn-secondary" style="flex:1" onclick="deleteContact(${Number(c.id)})">Delete</button>
@@ -2165,21 +2258,15 @@ async function addToHistory(tx: TxHistory) {
     ? `${tx.hash.replace(/[^a-zA-Z0-9]/g, "")}_${tx.type}_${tx.token}`
     : `tx_${tx.ts}_${Math.random().toString(36).slice(2)}`;
 
-  // ── 1. Lưu cho ví hiện tại (sender) ──────────────────────
+  // ── 1. Lưu cho ví hiện tại ────────────────────────────────
   try {
     await setDoc(
       doc(db, "users", state.address.toLowerCase(), "history", docId),
-      {
-        ...tx,
-        ownerAddress: state.address.toLowerCase(),
-        updatedAt: Date.now(),
-      },
+      { ...tx, ownerAddress: state.address.toLowerCase(), updatedAt: Date.now() },
       { merge: true },
     );
     const key = `${tx.hash}-${tx.type}-${tx.token}`;
-    const exists = state.history.some(
-      (h) => `${h.hash}-${h.type}-${h.token}` === key,
-    );
+    const exists = state.history.some((h) => `${h.hash}-${h.type}-${h.token}` === key);
     if (!exists) {
       state.history.unshift(tx);
       updateHistoryStats();
@@ -2193,32 +2280,41 @@ async function addToHistory(tx: TxHistory) {
     renderHistory();
   }
 
-  // ── 2. Lưu cho ví đối phương (receiver) ──────────────────
-  // Chỉ áp dụng khi tx.type === "sent" và có địa chỉ nhận hợp lệ
+  // ── 2. Lưu received cho ví đối phương + cập nhật totalReceived contact ──
   if (tx.type === "sent" && tx.to && ethers.isAddress(tx.to)) {
     const receiverAddr = tx.to.toLowerCase();
     const receiverDocId = tx.hash
       ? `${tx.hash.replace(/[^a-zA-Z0-9]/g, "")}_received_${tx.token}`
       : `tx_${tx.ts}_recv_${Math.random().toString(36).slice(2)}`;
-
-    const receiverTx: TxHistory = {
-      ...tx,
-      type: "received",
-      ownerAddress: receiverAddr,
-    };
-
+    const receiverTx: TxHistory = { ...tx, type: "received", ownerAddress: receiverAddr };
     try {
       await setDoc(
         doc(db, "users", receiverAddr, "history", receiverDocId),
-        {
-          ...receiverTx,
-          ownerAddress: receiverAddr,
-          updatedAt: Date.now(),
-        },
+        { ...receiverTx, ownerAddress: receiverAddr, updatedAt: Date.now() },
         { merge: true },
       );
     } catch (e) {
       console.error("addToHistory receiver error", e);
+    }
+
+    // Cập nhật totalReceived cho contact người nhận trong danh sách của mình
+    const receiverContact = state.contacts.find(
+      (c: any) => c.address.toLowerCase() === receiverAddr,
+    );
+    if (receiverContact) {
+      receiverContact.totalReceived = (receiverContact.totalReceived || 0) + parseFloat(tx.amount);
+      await fbSave("contacts", receiverContact);
+    }
+  }
+
+  // ── 3. Cập nhật totalReceived cho contact người gửi (khi mình nhận) ──
+  if (tx.type === "received" && tx.from && ethers.isAddress(tx.from)) {
+    const senderContact = state.contacts.find(
+      (c: any) => c.address.toLowerCase() === tx.from!.toLowerCase(),
+    );
+    if (senderContact) {
+      senderContact.totalReceived = (senderContact.totalReceived || 0) + parseFloat(tx.amount);
+      await fbSave("contacts", senderContact);
     }
   }
 }
@@ -3032,3 +3128,278 @@ function navDrawer(id: string) {
   });
 }
 (window as any).navDrawer = navDrawer;
+
+// ── Agentic approval: lưu trên Firebase thay vì localStorage ─────────────
+
+async function fbIsAgenticApproved(): Promise<boolean> {
+  if (!state.address) return false;
+  try {
+    const snap = await getDocs(
+      query(userCol("agentic"), where("ownerAddress", "==", state.address.toLowerCase()))
+    );
+    if (snap.empty) return false;
+    return snap.docs[0]?.data()?.approved === true;
+  } catch { return false; }
+}
+
+async function fbSetAgenticApproved(): Promise<void> {
+  if (!state.address) return;
+  await setDoc(
+    userDocRef("agentic", "approval"),
+    { approved: true, approvedAt: Date.now(), ownerAddress: state.address.toLowerCase(), updatedAt: Date.now() },
+    { merge: true }
+  );
+  // Sync vào localStorage để agenticPayment.ts (dùng localStorage) nhận biết ngay
+  try { localStorage.setItem("crapay_agentic_approved_v1_" + state.address.toLowerCase(), "1"); } catch {}
+}
+
+async function fbClearAgenticApproved(): Promise<void> {
+  if (!state.address) return;
+  await setDoc(
+    userDocRef("agentic", "approval"),
+    { approved: false, approvedAt: null, ownerAddress: state.address.toLowerCase(), updatedAt: Date.now() },
+    { merge: true }
+  );
+  try { localStorage.removeItem("crapay_agentic_approved_v1_" + state.address.toLowerCase()); } catch {}
+}
+
+/**
+ * Wrapper cho ensureAgenticApproval — check Firebase trước, sync vào localStorage,
+ * rồi sau khi approve xong lưu lại Firebase.
+ */
+async function ensureAgenticApprovalWithFb(signer: ethers.JsonRpcSigner): Promise<void> {
+  const address = await signer.getAddress();
+  const fbApproved = await fbIsAgenticApproved();
+  if (fbApproved) {
+    // Đã approved trên Firebase → sync localStorage để agenticPayment.ts skip approval
+    try { localStorage.setItem("crapay_agentic_approved_v1_" + address.toLowerCase(), "1"); } catch {}
+  }
+  await ensureAgenticApproval(signer);
+  if (!fbApproved) {
+    await fbSetAgenticApproved();
+  }
+}
+
+// Sync approval flag từ Firebase vào localStorage khi app load
+async function syncAgenticApprovalFromFb(): Promise<void> {
+  if (!state.address) return;
+  try {
+    const approved = await fbIsAgenticApproved();
+    if (approved) {
+      localStorage.setItem("crapay_agentic_approved_v1_" + state.address.toLowerCase(), "1");
+    } else {
+      localStorage.removeItem("crapay_agentic_approved_v1_" + state.address.toLowerCase());
+    }
+  } catch {}
+}
+
+// ── Agentic Payment Page ────────────────────────────────────────────────
+ 
+function initAgenticPage(): void {
+  setText("agentic-usdc-bal", state.usdcBal + " USDC");
+  updateAgenticBanner();
+  renderAgenticHistory();
+}
+(window as any).initAgenticPage = initAgenticPage;
+ 
+function updateAgenticBanner(): void {
+  const banner = document.getElementById("agentic-approval-banner");
+  const icon   = document.getElementById("agentic-approval-icon");
+  const title  = document.getElementById("agentic-approval-title");
+  const sub    = document.getElementById("agentic-approval-sub");
+  const resetBtn = document.getElementById("agentic-reset-btn");
+  if (!banner) return;
+ 
+  banner.style.display = "flex";
+ 
+  const _agApproved = state.address ? localStorage.getItem("crapay_agentic_approved_v1_" + state.address.toLowerCase()) === "1" : false;
+  if (_agApproved) {
+    if (icon)  icon.textContent  = "✅";
+    if (title) title.textContent = "Approved — payments are fully automatic";
+    if (sub)   sub.textContent   = "You signed once. All future payments run without wallet prompts.";
+    if (resetBtn) resetBtn.style.display = "inline-flex";
+    banner.style.borderLeft = "3px solid rgba(76,175,80,0.6)";
+    banner.style.background = "rgba(76,175,80,0.05)";
+  } else {
+    if (icon)  icon.textContent  = "🔓";
+    if (title) title.textContent = "One-time approval required";
+    if (sub)   sub.textContent   = "You'll sign once on your first payment. Never again after that.";
+    if (resetBtn) resetBtn.style.display = "none";
+    banner.style.borderLeft = "3px solid rgba(108,99,255,0.5)";
+    banner.style.background = "rgba(108,99,255,0.05)";
+  }
+}
+(window as any).updateAgenticBanner = updateAgenticBanner;
+ 
+async function doAgenticPayment(): Promise<void> {
+  if (!requireWallet()) return;
+ 
+  const toEl     = document.getElementById("agentic-to")     as HTMLInputElement;
+  const amountEl = document.getElementById("agentic-amount") as HTMLInputElement;
+  const descEl   = document.getElementById("agentic-desc")   as HTMLInputElement;
+  const expiryEl = document.getElementById("agentic-expiry") as HTMLSelectElement;
+  const btn      = document.getElementById("agentic-pay-btn") as HTMLButtonElement;
+ 
+  const recipient    = toEl?.value.trim();
+  const amount       = amountEl?.value.trim();
+  const description  = descEl?.value.trim() || "Agentic Payment via CRAPAY";
+  const expirySeconds = parseInt(expiryEl?.value || "86400");
+ 
+  if (!recipient || !ethers.isAddress(recipient)) {
+    toast("error", "Invalid recipient address"); return;
+  }
+  if (!amount || parseFloat(amount) <= 0) {
+    toast("error", "Enter a valid amount"); return;
+  }
+  if (parseFloat(amount) > parseFloat(state.usdcBal)) {
+    toast("error", "Insufficient USDC balance"); return;
+  }
+  if (!state.signer) {
+    toast("error", "Wallet not connected"); return;
+  }
+ 
+  setLoading(btn, true, "Processing…");
+ 
+  try {
+    await ensureArcNetwork();
+ 
+    const result = await agenticPaymentWithUI(state.signer, {
+      recipient,
+      amount,
+      description,
+      expirySeconds,
+      onComplete: async (jobId, txHash) => {
+        // Thêm vào local state history (hiển thị ngay, không cần Firebase)
+        const entry: TxHistory = {
+          hash: txHash,
+          from: state.address!,
+          to: recipient,
+          amount,
+          token: "USDC",
+          type: "agentic",
+          msg: `Job #${jobId} — ${description}`,
+          ts: Date.now(),
+          ownerAddress: state.address!.toLowerCase(),
+        };
+        state.history.unshift(entry);
+ 
+        // Refresh
+        await refreshBalances();
+        renderHomeTx();
+        renderAgenticHistory();
+        updateAgenticBanner();
+        clearFields(["agentic-to", "agentic-amount", "agentic-desc"]);
+      },
+    });
+ 
+    if (!result) {
+      // User cancelled — đã hiện dialog trong agenticPaymentWithUI
+    }
+  } catch (err: any) {
+    toast("error", err?.message ?? "Payment failed");
+  } finally {
+    setLoading(btn, false, "⚡ Send Agentic Payment");
+  }
+}
+(window as any).doAgenticPayment = doAgenticPayment;
+ 
+async function agenticResetApproval(): Promise<void> {
+  if (!state.address) return;
+  await fbClearAgenticApproved();
+  updateAgenticBanner();
+  toast("info", "Approval reset — next payment will ask for signature");
+}
+(window as any).agenticResetApproval = agenticResetApproval;
+ 
+/** Sync: scan JobCreated events từ onchain, cập nhật history */
+async function agenticSyncHistory(): Promise<void> {
+  if (!state.address) { toast("error", "Connect wallet first"); return; }
+  const btn = document.querySelector("[onclick='agenticSyncHistory()']") as HTMLButtonElement;
+  if (btn) { btn.disabled = true; btn.textContent = "Syncing…"; }
+ 
+  try {
+    const jobs = await fetchJobsFromEvents(state.address);
+    renderAgenticHistoryFromJobs(jobs);
+    toast("success", `Synced ${jobs.length} job(s) from chain`);
+  } catch (e: any) {
+    toast("error", "Sync failed: " + (e?.message ?? "Unknown error"));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "🔄 Sync from chain"; }
+  }
+}
+(window as any).agenticSyncHistory = agenticSyncHistory;
+ 
+/** Render từ state.history (local, nhanh) */
+function renderAgenticHistory(): void {
+  const agenticTxs = state.history
+    .filter((h) => h.type === "agentic")
+    .slice(0, 15);
+ 
+  if (!agenticTxs.length) {
+    // Thử đọc từ onchain nếu có address
+    if (state.address) {
+      fetchJobsByAddress(state.address)
+        .then(renderAgenticHistoryFromJobs)
+        .catch(() => {});
+    }
+    return;
+  }
+ 
+  const el = document.getElementById("agentic-history");
+  if (!el) return;
+ 
+  el.innerHTML = agenticTxs.map((tx) => `
+    <div class="tx-item" style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="width:36px;height:36px;border-radius:50%;background:rgba(108,99,255,0.15);
+                  display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">⚡</div>
+      <div style="flex:1;min-width:0">
+        <div class="fw600 text-sm">${sanitize(tx.msg ?? "Agentic Payment")}</div>
+        <div class="text-xs text-muted">→ ${shortAddr(tx.to)} · ${fmtDate(tx.ts)}</div>
+      </div>
+      <div style="text-align:right;font-size:13px;font-weight:600;color:var(--red);flex-shrink:0">
+        -${sanitize(tx.amount)} USDC
+        ${tx.hash
+          ? `<a href="https://testnet.arcscan.app/tx/${tx.hash}" target="_blank"
+               style="display:block;font-size:11px;color:#6c63ff;text-decoration:none;font-weight:400">
+               View ↗</a>`
+          : ""}
+      </div>
+    </div>`).join("");
+}
+(window as any).renderAgenticHistory = renderAgenticHistory;
+ 
+/** Render từ onchain jobs (sau khi sync) */
+function renderAgenticHistoryFromJobs(jobs: OnchainJob[]): void {
+  const el = document.getElementById("agentic-history");
+  if (!el) return;
+ 
+  if (!jobs.length) {
+    el.innerHTML = '<div class="empty-state text-xs">No agentic payments found onchain</div>';
+    return;
+  }
+ 
+  const statusColor = (s: string) =>
+    s === "Completed" ? "#4caf50" : s === "Rejected" || s === "Expired" ? "#f44336" : "#6c63ff";
+ 
+  el.innerHTML = jobs.map((job) => `
+    <div class="tx-item" style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="width:36px;height:36px;border-radius:50%;background:rgba(108,99,255,0.15);
+                  display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">⚡</div>
+      <div style="flex:1;min-width:0">
+        <div class="fw600 text-sm">${sanitize(job.description)}</div>
+        <div class="text-xs text-muted">
+          → ${shortAddr(job.provider)} · Job #${sanitize(job.jobId)}
+        </div>
+        <div class="text-xs" style="color:${statusColor(job.status)};margin-top:2px">
+          ${sanitize(job.status)}
+        </div>
+      </div>
+      <div style="text-align:right;font-size:13px;font-weight:600;color:var(--red);flex-shrink:0">
+        ${sanitize(job.budget)} USDC
+        <a href="https://testnet.arcscan.app/address/0x0747EEf0706327138c69792bF28Cd525089e4583?tab=contract" target="_blank"
+           style="display:block;font-size:11px;color:#6c63ff;text-decoration:none;font-weight:400">
+          Arcscan ↗</a>
+      </div>
+    </div>`).join("");
+}
+(window as any).renderAgenticHistoryFromJobs = renderAgenticHistoryFromJobs;
