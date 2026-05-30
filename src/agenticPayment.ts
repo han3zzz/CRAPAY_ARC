@@ -287,16 +287,23 @@ export async function ensureAgenticApproval(
     title: "One-time Approval Required",
     html: `
       <div style="text-align:left;font-size:14px;color:#bbb;line-height:1.7">
-        <p>CRAPAY cần bạn ký <strong style="color:#fff">1 lần duy nhất</strong>
-        để uỷ quyền giao dịch Agentic Payment tự động.</p>
-        <p style="margin-top:8px">Sau bước này, mọi thanh toán tiếp theo
-        <strong style="color:#6c63ff">không cần ký ví</strong> nữa.</p>
-        <div style="background:#0f1118;border-radius:8px;padding:10px;margin-top:12px;font-size:12px;line-height:1.8">
-          <div>📋 Contract: <code>${AGENTIC_COMMERCE_CONTRACT.slice(0, 10)}…${AGENTIC_COMMERCE_CONTRACT.slice(-6)}</code></div>
-          <div>💰 Token: USDC (ERC-20)</div>
-          <div>🔓 Allowance: Unlimited — standard ERC-20 approve</div>
-          <div>🔗 Data lưu 100% onchain trên Arc, không qua server</div>
-        </div>
+       <p>CRAPAY requires you to sign <strong style="color:#fff">only once</strong>
+        to authorize automatic Agentic Payment transactions.
+       <p style="margin-top:8px">After this step, all subsequent payments
+
+      <strong style="color:#6c63ff">no longer require wallet signing.</p>
+
+      <div style="background:#0f1118;border-radius:8px;padding:10px;margin-top:12px;font-size:12px;line-height:1.8">
+
+      <div>📋 Contract: <code>${AGENTIC_COMMERCE_CONTRACT.slice(0, 10)}…${AGENTIC_COMMERCE_CONTRACT.slice(-6)}</code></div>
+
+      <div>💰 Token: USDC (ERC-20)</div>
+
+      <div>🔓 Allowance: Unlimited — standard ERC-20 approve</div>
+
+      <div>🔗 Data stored 100% on-chain on Arc, not through a server</div>
+
+      </div>
       </div>
     `,
     icon: "info",
