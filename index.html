@@ -97,6 +97,13 @@
       </svg>
       <span>Scheduled</span>
     </div>
+    <!-- <div class="nav-item" onclick="nav('agentic')" title="Agentic Payment">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <circle cx="12" cy="12" r="3"/>
+    <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+  </svg>
+  <span>Agentic Payment</span>
+</div> -->
     <div class="nav-item" onclick="nav('contacts')" title="Contacts">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
@@ -449,6 +456,116 @@
         </div>
       </div>
 
+      <div id="page-agentic" class="page">
+ 
+  <div class="section-header">
+    <h2>⚡ Agentic Payment</h2>
+    <p class="text-muted text-sm">
+      Sign once, pay forever — powered by Arc ERC-8183.
+      All data stored permanently onchain. No server, no Firebase.
+    </p>
+  </div>
+ 
+  <!-- Approval status banner -->
+  <div id="agentic-approval-banner" class="card mb-16" style="display:none;gap:12px;align-items:center">
+    <div id="agentic-approval-icon" style="font-size:24px">🔓</div>
+    <div style="flex:1">
+      <div id="agentic-approval-title" class="fw600"></div>
+      <div id="agentic-approval-sub" class="text-xs text-muted mt-2"></div>
+    </div>
+    <button id="agentic-reset-btn" onclick="agenticResetApproval()"
+      class="btn-ghost text-xs" style="display:none">Reset</button>
+  </div>
+ 
+  <!-- Payment form -->
+  <div class="card">
+    <div class="form-group">
+      <label class="form-label">Recipient Address</label>
+      <input id="agentic-to" type="text" class="form-input"
+        placeholder="0x… wallet address" list="contacts-datalist">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Amount (USDC)</label>
+      <div class="input-group">
+        <input id="agentic-amount" type="number" class="form-input"
+          placeholder="0.00" min="0.01" step="0.01">
+        <span class="input-suffix">USDC</span>
+      </div>
+      <div class="text-xs text-muted mt-4">
+        Balance: <span id="agentic-usdc-bal">—</span>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <input id="agentic-desc" type="text" class="form-input"
+        placeholder="e.g. Monthly fee, Service payment…">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Job Expiry</label>
+      <select id="agentic-expiry" class="form-input">
+        <option value="3600">1 hour</option>
+        <option value="86400" selected>24 hours</option>
+        <option value="604800">7 days</option>
+        <option value="2592000">30 days</option>
+      </select>
+    </div>
+    <button id="agentic-pay-btn" onclick="doAgenticPayment()" class="btn-primary w-full mt-8">
+      ⚡ Send Agentic Payment
+    </button>
+  </div>
+ 
+  <!-- Onchain job history -->
+  <div class="card mt-16">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div class="fw600">Onchain Job History</div>
+      <button onclick="agenticSyncHistory()" class="btn-ghost text-xs">
+        🔄 Sync from chain
+      </button>
+    </div>
+    <div id="agentic-history">
+      <div class="empty-state text-xs">No agentic payments yet</div>
+    </div>
+  </div>
+ 
+  <!-- How it works -->
+  <div class="card mt-16">
+    <div class="fw600 mb-12">How it works</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="step-item">
+        <div class="step-num">1</div>
+        <div>
+          <div class="fw600 text-sm">First time — Sign once</div>
+          <div class="text-xs text-muted">
+            Approve unlimited USDC for the ERC-8183 contract.
+            Stored onchain. Never asked again.
+          </div>
+        </div>
+      </div>
+      <div class="step-item">
+        <div class="step-num">2</div>
+        <div>
+          <div class="fw600 text-sm">Automatic every time after</div>
+          <div class="text-xs text-muted">
+            CRAPAY creates the job, locks escrow, submits the deliverable,
+            and completes — no wallet prompts.
+          </div>
+        </div>
+      </div>
+      <div class="step-item">
+        <div class="step-num">3</div>
+        <div>
+          <div class="fw600 text-sm">All data lives onchain</div>
+          <div class="text-xs text-muted">
+            Every job has a permanent ID on Arc. No server, no Firebase,
+            no third-party storage. Query anytime via Arcscan.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+ 
+</div>
+
       <!-- ══════════════ PAYMENT LINK ══════════════ -->
       <div class="page" id="page-paylink">
         <div class="grid2">
@@ -493,6 +610,7 @@
         <div class="grid2">
           <div class="card">
             <div class="section-title">New Scheduled Payment</div>
+           
             <div class="token-tabs" id="sched-token-tabs">
               <div class="token-tab active" data-token="USDC" onclick="selectToken(this,'sched-token-tabs')">💵 USDC
               </div>
@@ -515,11 +633,51 @@
           </div>
           <div class="card">
             <div class="section-title">Scheduled Payments</div>
+              <p class="text-muted text-sm" style="padding-bottom: 20px;">
+      Sign once, pay forever — powered by Arc ERC-8183.
+      All data stored permanently onchain.
+    </p>
             <div id="schedule-list">
               <div class="empty-state text-xs">No scheduled payments</div>
             </div>
           </div>
         </div>
+          <!-- How it works -->
+  <div class="card mt-16">
+    <div class="fw600 mb-12">How it works</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="step-item">
+        <div class="step-num">1</div>
+        <div>
+          <div class="fw600 text-sm">First time — Sign once</div>
+          <div class="text-xs text-muted">
+            Approve unlimited USDC for the ERC-8183 contract.
+            Stored onchain. Never asked again.
+          </div>
+        </div>
+      </div>
+      <div class="step-item">
+        <div class="step-num">2</div>
+        <div>
+          <div class="fw600 text-sm">Automatic every time after</div>
+          <div class="text-xs text-muted">
+            CRAPAY creates the job, locks escrow, submits the deliverable,
+            and completes — no wallet prompts.
+          </div>
+        </div>
+      </div>
+      <div class="step-item">
+        <div class="step-num">3</div>
+        <div>
+          <div class="fw600 text-sm">All data lives onchain</div>
+          <div class="text-xs text-muted">
+            Every job has a permanent ID on Arc. No server,
+            no third-party storage. Query anytime via Arcscan.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
       </div>
 
       <!-- ══════════════ CONTACTS ══════════════ -->
