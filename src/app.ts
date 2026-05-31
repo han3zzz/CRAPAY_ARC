@@ -20,7 +20,6 @@ import {
   agenticPaymentWithUI,
   executeAgenticPayment,
   ensureAgenticApproval,
-  createScheduledJob,
   fetchJobsByAddress,
   fetchJobsFromEvents,
   type OnchainJob,
@@ -547,12 +546,6 @@ async function connectWallet() {
     buildAnalytics();
 
     toast("success", `Connected: ${shortAddr(state.address)}`);
-
-    // Chạy schedule ngay và check mỗi phút
-    runDueSchedules();
-    if (!(window as any).__scheduleTimer) {
-      (window as any).__scheduleTimer = setInterval(runDueSchedules, 60_000);
-    }
   } catch (e: any) {
     if (e.code === 4001) return;
     console.error(e);
@@ -563,10 +556,6 @@ async function connectWallet() {
 
 // Fix #16: render all lists empty on disconnect
 function disconnectWallet() {
-  if ((window as any).__scheduleTimer) {
-    clearInterval((window as any).__scheduleTimer);
-    (window as any).__scheduleTimer = null;
-  }
   lsSetDisconnected();
   lsClearWallet();
 
@@ -741,13 +730,6 @@ window.addEventListener("load", async () => {
       renderHomeTx();
       renderHistory();
       buildAnalytics();
-
-      // Lấy signer và start schedule timer (giống connectWallet)
-      try { state.signer = await state.provider.getSigner(); } catch {}
-      runDueSchedules();
-      if (!(window as any).__scheduleTimer) {
-        (window as any).__scheduleTimer = setInterval(runDueSchedules, 60_000);
-      }
     } catch (e) {
       console.error("Auto-reconnect error", e);
     }
@@ -793,15 +775,6 @@ window.addEventListener("load", async () => {
       updateContactDatalist();
 
       toast("info", `Switched to ${shortAddr(newAccounts[0])}`);
-
-      // Restart schedule timer với signer mới
-      if ((window as any).__scheduleTimer) {
-        clearInterval((window as any).__scheduleTimer);
-        (window as any).__scheduleTimer = null;
-      }
-      (window as any).__scheduleApprovalWarned = false;
-      runDueSchedules();
-      (window as any).__scheduleTimer = setInterval(runDueSchedules, 60_000);
     },
   );
 
@@ -1504,118 +1477,78 @@ function renderLinks() {
 // ── Scheduled Payments ─────────────────────────────────────
 async function doAddSchedule() {
   if (!requireWallet()) return;
+  const to =
+    (document.getElementById("sched-to") as HTMLInputElement)?.value.trim() ??
+    "";
+  const amount =
+    (
+      document.getElementById("sched-amount") as HTMLInputElement
+    )?.value.trim() ?? "";
+  const msg =
+    (document.getElementById("sched-msg") as HTMLInputElement)?.value.trim() ??
+    "";
+  const freq =
+    (document.getElementById("sched-freq") as HTMLInputElement)?.value ??
+    "once";
+  const date =
+    (document.getElementById("sched-date") as HTMLInputElement)?.value ?? "";
+  const token = getActiveToken("sched-token-tabs") ?? "USDC";
 
-  const to     = (document.getElementById("sched-to")     as HTMLInputElement)?.value.trim() ?? "";
-  const amount = (document.getElementById("sched-amount") as HTMLInputElement)?.value.trim() ?? "";
-  const msg    = (document.getElementById("sched-msg")    as HTMLInputElement)?.value.trim() ?? "";
-  const freq   = (document.getElementById("sched-freq")   as HTMLInputElement)?.value ?? "once";
-  const date   = (document.getElementById("sched-date")   as HTMLInputElement)?.value ?? "";
-  const token  = getActiveToken("sched-token-tabs") ?? "USDC";
-  const btn    = document.getElementById("sched-add-btn") as HTMLButtonElement | null;
-
-  if (!ethers.isAddress(to))                           { toast("error", "Invalid recipient address"); return; }
-  if (!amount || parseFloat(amount) <= 0)              { toast("error", "Enter a valid amount"); return; }
-  if (parseFloat(amount) > parseFloat(state.usdcBal)) { toast("error", "Insufficient USDC balance"); return; }
-
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  tomorrow.setHours(0, 0, 0, 0);
-  if (!date || new Date(date).getTime() < tomorrow.getTime()) {
-    toast("error", "Start date must be at least tomorrow");
+  // Fix #2: validate address
+  if (!ethers.isAddress(to)) {
+    toast("error", "Invalid recipient address");
+    return;
+  }
+  if (!amount || parseFloat(amount) <= 0) {
+    toast("error", "Enter a valid amount");
     return;
   }
 
-  if (!state.signer) { toast("error", "Wallet not connected"); return; }
 
-  setLoading(btn, true, "Creating…");
+const tomorrow = new Date();
+tomorrow.setDate(tomorrow.getDate() + 1);
+tomorrow.setHours(0, 0, 0, 0);
+const tomorrowTs = tomorrow.getTime();
 
-  // Progress modal
-  Swal.fire({
-    title: "⏰ Creating Schedule",
-    html: `<div id="sched-step" style="font-size:13px;color:#aaa;text-align:left;padding:4px 0">Initializing…</div>`,
-    showConfirmButton: false,
-    allowOutsideClick: false,
-    background: "#161923",
-    color: "#eef0ff",
-    didOpen: () => Swal.showLoading(),
-  });
+const selectedTs = date ? new Date(date).getTime() : 0;
+if (!date || selectedTs < tomorrowTs) {
+  toast("error", "Start date must be at least tomorrow");
+  return;
+}
 
-  let modalClosed = false;
+  // Xin approve Agentic 1 lần ngay khi tạo schedule
+  // → lúc runDueSchedules() chạy ngầm sẽ hoàn toàn tự động, không popup bất ngờ
   try {
-    await ensureArcNetwork();
-
-    const description = msg
-      ? `${msg} — Scheduled ${cap(freq)} via CRAPAY`
-      : `Scheduled ${cap(freq)} payment via CRAPAY`;
-
-    // Tạo job onchain: user ký 3 tx (createJob + setBudget + fund)
-    // Server cron sẽ tự submit + complete khi đến hạn — không cần user online
-    const { jobId } = await createScheduledJob(state.signer, {
-      recipient: to,
-      amount,
-      description,
-      onStep: (step, detail) => {
-        const el = document.getElementById("sched-step");
-        if (el) el.textContent = step.replace(/[📋🔓💰🔒✅⏳🎉]/g, "").trim();
-      },
-    });
-
-    const startTs = new Date(date).getTime();
-    const sched = {
-      id:           Date.now(),
-      to,
-      amount,
-      token,
-      msg,
-      freq,
-      nextRunAt:    startTs,
-      active:       true,
-      createdAt:    Date.now(),
-      pendingJobId: jobId,  // server cron dùng jobId này
-    };
-
-    await fbSave("schedules", sched);
-    state.schedules.unshift(sched);
-
-    modalClosed = true;
-    Swal.fire({
-      icon: "success",
-      title: "Schedule Created! ✅",
-      html: `
-        <div style="text-align:left;font-size:14px;color:#bbb;line-height:1.9">
-          <div>💸 <strong style="color:#fff">${amount} USDC</strong> → ${shortAddr(to)}</div>
-          <div>🔁 <strong style="color:#fff">${cap(freq)}</strong> starting ${date}</div>
-          <div>📋 Job ID: <strong style="color:#6c63ff">#${jobId}</strong></div>
-          <div style="margin-top:8px;font-size:12px;color:#777">
-            USDC locked — server will auto-pay on schedule, no need to keep app open
-          </div>
-        </div>`,
-      background: "#161923",
-      color: "#eef0ff",
-      confirmButtonColor: "#6c63ff",
-      confirmButtonText: "Done",
-    });
-
-    renderSchedules();
-    clearFields(["sched-to", "sched-amount", "sched-msg", "sched-date"]);
-    renderHomeSchedule();
-    await refreshBalances();
-
-  } catch (e: any) {
-    if (!modalClosed) {
-      const cancelled = e?.code === 4001 || e?.message?.includes("cancelled");
-      Swal.fire({
-        icon: cancelled ? "info" : "error",
-        title: cancelled ? "Cancelled" : "Failed",
-        text: cancelled ? "Schedule creation cancelled." : (e?.message ?? "Unknown error"),
-        background: "#161923",
-        color: "#eef0ff",
-        confirmButtonColor: "#6c63ff",
-      });
+    if (!state.signer) {
+      state.signer = await state.provider!.getSigner();
     }
-  } finally {
-    setLoading(btn, false, "➕ Add Schedule");
+    await ensureArcNetwork();
+    await ensureAgenticApprovalWithFb(state.signer);
+  } catch (e: any) {
+    // User huỷ approve → không tạo schedule
+    toast("error", e?.message?.includes("cancelled") ? "Approval cancelled — schedule not created" : (e?.message ?? "Approval failed"));
+    return;
   }
+
+
+const startTs = date ? new Date(date).getTime() : tomorrow.getTime();
+  const sched = {
+    id: Date.now(),
+    to,
+    amount,
+    token,
+    msg,
+    freq,
+    nextRunAt: startTs,
+    active: true,
+    createdAt: Date.now(),
+  };
+  await fbSave("schedules", sched);
+  state.schedules.unshift(sched);
+  renderSchedules();
+  clearFields(["sched-to", "sched-amount", "sched-msg", "sched-date"]);
+  toast("success", "Payment scheduled!");
+  renderHomeSchedule();
 }
 (window as any).doAddSchedule = doAddSchedule;
 
@@ -1664,30 +1597,27 @@ async function deleteSchedule(id: number) {
 }
 (window as any).deleteSchedule = deleteSchedule;
 
+// Fix #5: check state.address instead of state.signer (signer is always null until tx)
 async function runDueSchedules() {
-  if (!state.address || !state.signer) return;
+  if (!state.address) return;
   const now = Date.now();
-
-  // Kiểm tra approval từ Firebase 1 lần cho cả batch
-  const isApproved = await fbIsAgenticApproved().catch(() => false);
-  if (!isApproved) {
-    console.warn("[runDueSchedules] skipped — approval required");
-    // Toast 1 lần duy nhất (tránh spam mỗi 60s)
-    if (!(window as any).__scheduleApprovalWarned) {
-      (window as any).__scheduleApprovalWarned = true;
-      toast("warning", "⚠️ Scheduled payment needs one-time approval — please send an Agentic Payment manually first.");
-    }
-    return;
-  }
-  // Reset flag khi đã approve
-  (window as any).__scheduleApprovalWarned = false;
-
-  // Sync Firebase approval → localStorage để ensureAgenticApproval trong executeAgenticPayment không popup
-  await syncAgenticApprovalFromFb().catch(() => {});
-
   for (const s of state.schedules) {
     if (!s.active || s.nextRunAt > now) continue;
     try {
+      // Đảm bảo có signer trước khi chạy
+      if (!state.signer) {
+        if (state.provider) {
+          try { state.signer = await state.provider.getSigner(); }
+          catch { console.warn("Schedule: cannot get signer, skipping", s.id); continue; }
+        } else {
+          console.warn("Schedule: no provider, skipping", s.id); continue;
+        }
+      }
+
+      await ensureArcNetwork();
+      // Sync approval từ Firebase → localStorage trước khi chạy
+      await syncAgenticApprovalFromFb();
+
       const description = s.msg
         ? `${s.msg} — Scheduled ${cap(s.freq)}`
         : `Scheduled ${cap(s.freq)} payment via CRAPAY`;
@@ -1697,14 +1627,15 @@ async function runDueSchedules() {
         amount: s.amount,
         description,
         expirySeconds: 86400,
-        onStep: (step) => console.log(`[Schedule #${s.id}]`, step),
+        onStep: (step) => console.log(`[Scheduled #${s.id}]`, step),
       });
 
-      s.lastRunAt  = now;
+      s.lastRunAt = now;
       s.lastTxHash = result.txHash;
       s.lastJobId  = result.jobId;
-      s.active     = s.freq !== "once";
+      s.active = s.freq !== "once";
       if (s.active) s.nextRunAt = nextRunTime(s.freq, now);
+
       await fbSave("schedules", s);
 
       const entry: TxHistory = {
@@ -1720,9 +1651,12 @@ async function runDueSchedules() {
       };
       state.history.unshift(entry);
       await addToHistory(entry);
-      await pushNotif(`⚡ Scheduled: sent ${s.amount} USDC to ${shortAddr(s.to)} (Job #${result.jobId})`);
-    } catch (e: any) {
-      console.error(`[Schedule #${s.id}] failed:`, e?.message ?? e);
+
+      await pushNotif(
+        `⚡ Scheduled: sent ${s.amount} USDC to ${shortAddr(s.to)} (Job #${result.jobId})`,
+      );
+    } catch (e) {
+      console.error("Schedule failed", e);
     }
   }
   renderSchedules();
