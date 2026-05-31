@@ -33,7 +33,6 @@ const LS_JOB_IDS_PREFIX = "crapay_agentic_jobids_v1_"; // cache jobId list
 const ERC20_ABI = [
   "function approve(address spender, uint256 amount) returns (bool)",
   "function allowance(address owner, address spender) view returns (uint256)",
-  "function transfer(address to, uint256 amount) returns (bool)",
 ] as const;
 
 const AGENTIC_ABI = [
@@ -341,7 +340,6 @@ export async function executeAgenticPayment(
   const clientAddress = await signer.getAddress();
   const provider = signer.provider!;
   const agenticContract = new ethers.Contract(AGENTIC_COMMERCE_CONTRACT, AGENTIC_ABI, signer);
-  const usdcContract = new ethers.Contract(USDC_CONTRACT, ERC20_ABI, signer);
   const budgetWei = ethers.parseUnits(amount, 6);
 
   // Step 1: Đảm bảo đã approve (ký ví 1 lần nếu chưa)
@@ -353,13 +351,10 @@ export async function executeAgenticPayment(
   const expiredAt = BigInt(block.timestamp) + BigInt(expirySeconds);
 
   // Step 3: createJob
-  // provider = client → client tự gọi submit() được (spec: only provider calls submit)
-  // evaluator = client → client tự gọi complete() được (spec: evaluator MAY be client)
-  // Sau complete(), USDC về client → step 8 transfer thẳng cho recipient
   onStep?.("📋 Creating job on Arc…");
   const createTx = await agenticContract.createJob(
-    clientAddress,  // provider = client
-    clientAddress,  // evaluator = client
+    recipient,      // provider = người nhận tiền
+    clientAddress,  // evaluator = chính client (tự approve)
     expiredAt,
     description,
     "0x0000000000000000000000000000000000000000"
@@ -370,7 +365,9 @@ export async function executeAgenticPayment(
   const jobId = await extractJobId(provider, createTx.hash);
   const jobIdStr = jobId.toString();
 
+  // Cache jobId vào localStorage (để fetchJobsByAddress() chạy nhanh sau này)
   lsAddJobId(clientAddress, jobIdStr);
+
   onStep?.(`✅ Job #${jobIdStr} created!`, createTx.hash);
 
   // Step 4: setBudget
@@ -387,7 +384,7 @@ export async function executeAgenticPayment(
   await fundTx.wait();
   onStep?.("✅ Escrow funded!", fundTx.hash);
 
-  // Step 6: submit (client là provider → được phép theo spec)
+  // Step 6: submit deliverable
   onStep?.("📤 Submitting deliverable…");
   const deliverableHash = ethers.keccak256(
     ethers.toUtf8Bytes(`crapay-${jobIdStr}-${description}-${Date.now()}`)
@@ -397,8 +394,7 @@ export async function executeAgenticPayment(
   await submitTx.wait();
   onStep?.("✅ Deliverable submitted!", submitTx.hash);
 
-  // Step 7: complete → USDC released to provider (= clientAddress)
-  // (client là evaluator → được phép theo spec: "evaluator MAY be client")
+  // Step 7: complete → USDC released to provider
   onStep?.("🏁 Completing job — releasing payment…");
   const reasonHash = ethers.keccak256(
     ethers.toUtf8Bytes(`approved-${Date.now()}`)
@@ -406,21 +402,15 @@ export async function executeAgenticPayment(
   const completeTx = await agenticContract.complete(jobId, reasonHash, "0x");
   onStep?.("⏳ Finalizing…", completeTx.hash);
   await completeTx.wait();
-  onStep?.("✅ Escrow released!", completeTx.hash);
+  onStep?.(`🎉 Done! ${amount} USDC sent to ${recipient}`, completeTx.hash);
 
-  // Step 8: transfer USDC từ client → recipient thực sự
-  onStep?.(`💸 Sending ${amount} USDC to ${recipient}…`);
-  const transferTx = await usdcContract.transfer(recipient, budgetWei);
-  onStep?.("⏳ Confirming transfer…", transferTx.hash);
-  await transferTx.wait();
-  onStep?.(`🎉 Done! ${amount} USDC sent to ${recipient}`, transferTx.hash);
-
+  // Step 8: đọc lại onchain để confirm status
   const job = await agenticContract.getJob(jobId);
   const finalStatus = JOB_STATUS[Number(job.status)] ?? "Unknown";
 
   return {
     jobId: jobIdStr,
-    txHash: transferTx.hash,  // hash của transfer USDC → recipient
+    txHash: completeTx.hash,
     status: finalStatus,
     budget: ethers.formatUnits(job.budget, 6),
   };
@@ -429,102 +419,6 @@ export async function executeAgenticPayment(
 // ── Exports: approval state ────────────────────────────────────────────
 export const isAgenticApproved = (address: string) => lsIsApproved(address);
 export const resetAgenticApproval = (address: string) => lsClearApproved(address);
-
-// ── Scheduled Payment ──────────────────────────────────────────────────
-//
-// OPERATOR_ADDRESS: ví do developer tạo, dùng làm evaluator cho scheduled jobs.
-// Operator tự gọi submit() + complete() qua server cron — user không cần online.
-//
-// Tạo operator wallet:
-//   node -e "const {ethers}=require('ethers');const w=ethers.Wallet.createRandom();console.log(w.address,w.privateKey)"
-// → address điền vào đây, privateKey điền vào Render env OPERATOR_PRIVATE_KEY
-//
-export const OPERATOR_ADDRESS = "0x6D51A222409B2ebc2308131E6aCFcBdb169b2a68";
-
-/**
- * Tạo ERC-8183 job cho scheduled payment.
- *
- * User ký 3 tx (1 lần duy nhất khi tạo schedule):
- *   1. createJob(provider=clientAddress, evaluator=OPERATOR)
- *   2. setBudget(amount)
- *   3. fund() → USDC locked in escrow
- *
- * Server cron sau đó tự gọi khi đến hạn (không cần user online):
- *   4. submit()   ← operator là provider? Không — client là provider, nên cần trick:
- *                    provider = OPERATOR để operator submit được
- *   5. complete() ← operator là evaluator → OK
- *                    USDC released to OPERATOR
- *   6. operator.transfer(recipient, amount) ← server chuyển tiếp cho recipient
- *
- * Trả về jobId để lưu vào Firebase schedule.pendingJobId
- */
-export async function createScheduledJob(
-  signer: ethers.JsonRpcSigner,
-  options: {
-    recipient: string;
-    amount: string;
-    description: string;
-    onStep?: (step: string, detail?: string) => void;
-  }
-): Promise<{ jobId: string }> {
-  const { recipient, amount, description, onStep } = options;
-
-  const clientAddress   = await signer.getAddress();
-  const ethProvider     = signer.provider!;
-  const agenticContract = new ethers.Contract(AGENTIC_COMMERCE_CONTRACT, AGENTIC_ABI, signer);
-  const usdcContract    = new ethers.Contract(USDC_CONTRACT, ERC20_ABI, signer);
-  const budgetWei       = ethers.parseUnits(amount, 6);
-
-  // Approve nếu chưa đủ allowance
-  const allowance: bigint = await usdcContract.allowance(clientAddress, AGENTIC_COMMERCE_CONTRACT);
-  if (allowance < budgetWei) {
-    onStep?.("🔓 Approving USDC…");
-    const approveTx = await usdcContract.approve(AGENTIC_COMMERCE_CONTRACT, MAX_UINT256);
-    await approveTx.wait();
-    lsSetApproved(clientAddress);
-    onStep?.("✅ Approved");
-  }
-
-  // Expiry 400 ngày — đủ cover monthly recurring
-  const block = await ethProvider.getBlock("latest");
-  if (!block) throw new Error("Cannot fetch latest block");
-  const expiredAt = BigInt(block.timestamp) + BigInt(400 * 24 * 3600);
-
-  // createJob:
-  //   provider   = OPERATOR → operator gọi submit() được (spec: only provider calls submit)
-  //   evaluator  = OPERATOR → operator gọi complete() được (spec: only evaluator calls complete)
-  // Recipient thực sự được nhúng vào description để server biết transfer cho ai
-  const descWithRecipient = `${description}||to:${recipient}`;
-  onStep?.("📋 Creating scheduled job on Arc…");
-  const createTx = await agenticContract.createJob(
-    OPERATOR_ADDRESS, // provider = operator
-    OPERATOR_ADDRESS, // evaluator = operator
-    expiredAt,
-    descWithRecipient,
-    "0x0000000000000000000000000000000000000000"
-  );
-  onStep?.("⏳ Waiting…", createTx.hash);
-  await createTx.wait();
-
-  const jobId    = await extractJobId(ethProvider, createTx.hash);
-  const jobIdStr = jobId.toString();
-  lsAddJobId(clientAddress, jobIdStr);
-  onStep?.(`✅ Job #${jobIdStr} created!`, createTx.hash);
-
-  // setBudget — spec: client hoặc provider đều gọi được
-  onStep?.("💰 Setting budget…");
-  const setBudgetTx = await agenticContract.setBudget(jobId, budgetWei, "0x");
-  await setBudgetTx.wait();
-  onStep?.("✅ Budget set", setBudgetTx.hash);
-
-  // fund → lock USDC vào escrow
-  onStep?.("🔒 Locking USDC in escrow…");
-  const fundTx = await agenticContract.fund(jobId, "0x");
-  await fundTx.wait();
-  onStep?.("✅ USDC locked — server will auto-pay on schedule 🎉", fundTx.hash);
-
-  return { jobId: jobIdStr };
-}
 
 // ── UI wrapper: Payment với progress modal ────────────────────────────
 
@@ -538,8 +432,7 @@ export async function agenticPaymentWithUI(
     "Set payment budget",
     "Lock USDC in escrow",
     "Submit deliverable",
-    "Release from escrow",
-    "Send USDC to recipient",
+    "Release payment",
   ];
 
   let currentIdx = 0;
@@ -576,8 +469,7 @@ export async function agenticPaymentWithUI(
     if (text.includes("budget")) return 2;
     if (text.includes("escrow") || text.includes("Funding")) return 3;
     if (text.includes("deliverable")) return 4;
-    if (text.includes("Completing") || text.includes("Finalizing") || text.includes("released")) return 5;
-    if (text.includes("Sending") || text.includes("transfer") || text.includes("Done!")) return 6;
+    if (text.includes("Completing") || text.includes("Finalizing") || text.includes("Done!") || text.includes("released")) return 5;
     return currentIdx;
   }
 
@@ -611,7 +503,7 @@ export async function agenticPaymentWithUI(
           <div>💸 <strong style="color:#fff">${result.budget} USDC</strong></div>
           <div>📋 Job ID: <strong style="color:#6c63ff">#${result.jobId}</strong></div>
           <div>✅ Status: <strong style="color:#4caf50">${result.status}</strong></div>
-          <div>🔗 Data save onchain on Arc</div>
+          <div>🔗 Data lưu onchain vĩnh viễn trên Arc</div>
           <div style="margin-top:10px">
             <a href="${ARC_EXPLORER}/tx/${result.txHash}" target="_blank"
                style="color:#6c63ff;font-size:13px;text-decoration:none">
