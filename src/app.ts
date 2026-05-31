@@ -390,6 +390,7 @@ function onPageLoad(id: string) {
   }
  if (id === "schedule") {
   renderSchedules();
+  checkDueSchedules().catch(() => {});
   const dateEl = document.getElementById("sched-date") as HTMLInputElement | null;
   if (dateEl) {
     const tomorrow = new Date();
@@ -545,6 +546,7 @@ async function connectWallet() {
     updateContactDatalist();
     buildAnalytics();
 
+    checkDueSchedules().catch(() => {});
     toast("success", `Connected: ${shortAddr(state.address)}`);
   } catch (e: any) {
     if (e.code === 4001) return;
@@ -730,6 +732,7 @@ window.addEventListener("load", async () => {
       renderHomeTx();
       renderHistory();
       buildAnalytics();
+      checkDueSchedules().catch(() => {});
     } catch (e) {
       console.error("Auto-reconnect error", e);
     }
@@ -1516,20 +1519,6 @@ if (!date || selectedTs < tomorrowTs) {
   return;
 }
 
-  // Xin approve Agentic 1 lần ngay khi tạo schedule
-  // → lúc runDueSchedules() chạy ngầm sẽ hoàn toàn tự động, không popup bất ngờ
-  try {
-    if (!state.signer) {
-      state.signer = await state.provider!.getSigner();
-    }
-    await ensureArcNetwork();
-    await ensureAgenticApprovalWithFb(state.signer);
-  } catch (e: any) {
-    // User huỷ approve → không tạo schedule
-    toast("error", e?.message?.includes("cancelled") ? "Approval cancelled — schedule not created" : (e?.message ?? "Approval failed"));
-    return;
-  }
-
 
 const startTs = date ? new Date(date).getTime() : tomorrow.getTime();
   const sched = {
@@ -1597,70 +1586,117 @@ async function deleteSchedule(id: number) {
 }
 (window as any).deleteSchedule = deleteSchedule;
 
-// Fix #5: check state.address instead of state.signer (signer is always null until tx)
-async function runDueSchedules() {
+/**
+ * checkDueSchedules — KHÔNG tự chạy thanh toán.
+ * Khi có schedule đến hạn / quá hạn → hiện popup xác nhận từng cái.
+ * User ấn "Confirm & Sign" → mở progress modal → ký ví → gửi tiền.
+ * Gọi khi: load app (sau connect/auto-reconnect) + khi vào trang "schedule".
+ */
+async function checkDueSchedules(): Promise<void> {
   if (!state.address) return;
   const now = Date.now();
-  for (const s of state.schedules) {
-    if (!s.active || s.nextRunAt > now) continue;
-    try {
-      // Đảm bảo có signer trước khi chạy
-      if (!state.signer) {
-        if (state.provider) {
-          try { state.signer = await state.provider.getSigner(); }
-          catch { console.warn("Schedule: cannot get signer, skipping", s.id); continue; }
-        } else {
-          console.warn("Schedule: no provider, skipping", s.id); continue;
-        }
-      }
 
+  const due = state.schedules.filter((s) => s.active && s.nextRunAt <= now);
+  if (!due.length) return;
+
+  for (const s of due) {
+    const isOverdue = now - s.nextRunAt > 24 * 60 * 60 * 1000;
+    const label = isOverdue ? "⚠️ Overdue Payment" : "🔔 Payment Due";
+    const badgeColor = isOverdue ? "#f44336" : "#ff9800";
+    const badgeText = isOverdue ? "OVERDUE" : "DUE NOW";
+
+    const result = await Swal.fire({
+      title: label,
+      html: `
+        <div style="text-align:left;font-size:14px;line-height:2;color:#ccc">
+          <div style="margin-bottom:10px">
+            <span style="background:${badgeColor};color:#fff;padding:2px 10px;border-radius:20px;
+                         font-size:11px;font-weight:700;letter-spacing:1px">${badgeText}</span>
+          </div>
+          <div>💸 <strong style="color:#fff">${sanitize(s.amount)} ${sanitize(s.token)}</strong></div>
+          <div>→ <span style="font-family:monospace;color:#a0a8d0">${sanitize(s.to)}</span></div>
+          ${s.msg ? `<div>📝 ${sanitize(s.msg)}</div>` : ""}
+          <div>🔁 <span style="color:#aaa">${sanitize(cap(s.freq))}</span></div>
+          <div>📅 Due: <span style="color:#ffb547">${fmtDate(s.nextRunAt)}</span></div>
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonText: "✅ Confirm & Sign",
+      cancelButtonText: "Skip",
+      confirmButtonColor: "#6c63ff",
+      cancelButtonColor: "#444",
+      background: "#161923",
+      color: "#eef0ff",
+      allowOutsideClick: false,
+    });
+
+    if (!result.isConfirmed) continue; // user bấm Skip → qua schedule tiếp theo
+
+    // Đảm bảo có signer
+    if (!state.signer) {
+      if (!state.provider) { toast("error", "Wallet not connected"); continue; }
+      try { state.signer = await state.provider.getSigner(); }
+      catch { toast("error", "Cannot get wallet signer"); continue; }
+    }
+
+    try {
       await ensureArcNetwork();
-      // Sync approval từ Firebase → localStorage trước khi chạy
       await syncAgenticApprovalFromFb();
 
       const description = s.msg
         ? `${s.msg} — Scheduled ${cap(s.freq)}`
         : `Scheduled ${cap(s.freq)} payment via CRAPAY`;
 
-      const result = await executeAgenticPayment(state.signer, {
+      // agenticPaymentWithUI: hiện progress modal + ký ví + gửi
+      await agenticPaymentWithUI(state.signer, {
         recipient: s.to,
         amount: s.amount,
         description,
         expirySeconds: 86400,
-        onStep: (step) => console.log(`[Scheduled #${s.id}]`, step),
+        onComplete: async (jobId, txHash) => {
+          const ts = Date.now();
+          s.lastRunAt = ts;
+          s.lastTxHash = txHash;
+          s.lastJobId = jobId;
+          s.active = s.freq !== "once";
+          if (s.active) s.nextRunAt = nextRunTime(s.freq, ts);
+
+          await fbSave("schedules", s);
+
+          const entry: TxHistory = {
+            hash: txHash,
+            from: state.address!,
+            to: s.to,
+            amount: s.amount,
+            token: "USDC",
+            type: "agentic",
+            msg: `Job #${jobId} — ${description}`,
+            ts,
+            ownerAddress: state.address!.toLowerCase(),
+          };
+          state.history.unshift(entry);
+          await addToHistory(entry);
+
+          await pushNotif(
+            `⚡ Scheduled: sent ${s.amount} USDC to ${shortAddr(s.to)} (Job #${jobId})`,
+          );
+
+          renderSchedules();
+          renderHomeSchedule();
+          renderAgenticHistory();
+        },
       });
-
-      s.lastRunAt = now;
-      s.lastTxHash = result.txHash;
-      s.lastJobId  = result.jobId;
-      s.active = s.freq !== "once";
-      if (s.active) s.nextRunAt = nextRunTime(s.freq, now);
-
-      await fbSave("schedules", s);
-
-      const entry: TxHistory = {
-        hash: result.txHash,
-        from: state.address,
-        to: s.to,
-        amount: s.amount,
-        token: "USDC",
-        type: "agentic",
-        msg: `Job #${result.jobId} — ${description}`,
-        ts: now,
-        ownerAddress: state.address.toLowerCase(),
-      };
-      state.history.unshift(entry);
-      await addToHistory(entry);
-
-      await pushNotif(
-        `⚡ Scheduled: sent ${s.amount} USDC to ${shortAddr(s.to)} (Job #${result.jobId})`,
-      );
-    } catch (e) {
-      console.error("Schedule failed", e);
+    } catch (e: any) {
+      console.error("Schedule payment failed", e);
+      toast("error", `Payment failed: ${e?.message ?? "Unknown error"}`);
     }
   }
-  renderSchedules();
-  renderAgenticHistory();
+}
+(window as any).checkDueSchedules = checkDueSchedules;
+
+/** runDueSchedules — giữ tên cũ để không break, delegate sang checkDueSchedules */
+async function runDueSchedules(): Promise<void> {
+  return checkDueSchedules();
 }
 (window as any).runDueSchedules = runDueSchedules;
 
