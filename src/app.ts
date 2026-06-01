@@ -1516,16 +1516,18 @@ if (!date || selectedTs < tomorrowTs) {
   return;
 }
 
-  // Xin approve Agentic 1 lần ngay khi tạo schedule
-  // → lúc runDueSchedules() chạy ngầm sẽ hoàn toàn tự động, không popup bất ngờ
+  // Approve relayer address để server có thể transferFrom khi đến hạn
+  const RELAYER_ADDRESS = import.meta.env.VITE_RELAYER_ADDRESS as string;
+  if (!RELAYER_ADDRESS) {
+    toast("error", "Relayer not configured"); return;
+  }
   try {
     if (!state.signer) {
       state.signer = await state.provider!.getSigner();
     }
     await ensureArcNetwork();
-    await ensureAgenticApprovalWithFb(state.signer);
+    await ensureRelayerApproval(state.signer, RELAYER_ADDRESS);
   } catch (e: any) {
-    // User huỷ approve → không tạo schedule
     toast("error", e?.message?.includes("cancelled") ? "Approval cancelled — schedule not created" : (e?.message ?? "Approval failed"));
     return;
   }
@@ -3099,6 +3101,35 @@ async function fbClearAgenticApproved(): Promise<void> {
     { merge: true }
   );
   try { localStorage.removeItem("crapay_agentic_approved_v1_" + state.address.toLowerCase()); } catch {}
+}
+
+/**
+ * Approve relayer address để server có thể transferFrom USDC khi đến hạn.
+ * Chỉ approve 1 lần — nếu đã approve MAX_UINT thì skip.
+ */
+async function ensureRelayerApproval(
+  signer: ethers.JsonRpcSigner,
+  relayerAddress: string
+): Promise<void> {
+  const ERC20_APPROVE_ABI = [
+    "function allowance(address owner, address spender) view returns (uint256)",
+    "function approve(address spender, uint256 amount) returns (bool)",
+  ];
+  // Lấy USDC token address từ agenticPayment constants
+  const USDC = "0x3600000000000000000000000000000000000000";
+  const MAX  = ethers.MaxUint256;
+
+  const userAddress = await signer.getAddress();
+  const provider    = signer.provider!;
+  const usdc        = new ethers.Contract(USDC, ERC20_APPROVE_ABI, provider);
+
+  const allowance: bigint = await usdc.allowance(userAddress, relayerAddress);
+  // Nếu còn > 1000 USDC allowance thì coi như đã approve rồi, skip
+  if (allowance >= ethers.parseUnits("1000", 6)) return;
+
+  const usdcWithSigner = usdc.connect(signer) as ethers.Contract;
+  const tx = await usdcWithSigner.approve(relayerAddress, MAX);
+  await tx.wait();
 }
 
 /**
