@@ -570,36 +570,100 @@
       <div class="page" id="page-paylink">
         <div class="grid2">
           <div class="card">
-            <div class="section-title">Create Payment Link</div>
+            <div class="section-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+              </svg>
+              Create Payment Link
+            </div>
+
             <div class="token-tabs" id="link-token-tabs">
-              <div class="token-tab active" data-token="USDC" onclick="selectToken(this,'link-token-tabs')">💵 USDC
-              </div>
+              <div class="token-tab active" data-token="USDC" onclick="selectToken(this,'link-token-tabs')">💵 USDC</div>
               <div class="token-tab" data-token="EURC" onclick="selectToken(this,'link-token-tabs')">💶 EURC</div>
             </div>
-            <div class="field"><label>Amount (leave blank = any amount)</label><input type="number" id="link-amount"
-                placeholder="0.00" oninput="updateLinkPreview()" /></div>
-            <div class="field"><label>Message</label><input type="text" id="link-msg" placeholder="What's this for?"
-                oninput="updateLinkPreview()" /></div>
-            <div class="field"><label>Expiry</label>
+
+            <div class="field">
+              <label>Amount <span class="text-muted" style="font-weight:400">(leave blank = any amount)</span></label>
+              <input type="number" id="link-amount" placeholder="0.00" min="0" step="0.01" oninput="updateLinkPreview()" />
+            </div>
+
+            <div class="field">
+              <label>Note / Message</label>
+              <input type="text" id="link-msg" placeholder="What's this for?" oninput="updateLinkPreview()" />
+            </div>
+
+            <div class="field">
+              <label>Expiry</label>
               <select id="link-exp" onchange="updateLinkPreview()">
-                <option value="">No expiry</option>
+                <option value="0">No expiry</option>
                 <option value="3600000">1 hour</option>
                 <option value="86400000">24 hours</option>
                 <option value="604800000">7 days</option>
+                <option value="2592000000">30 days</option>
               </select>
             </div>
-            <div class="mb-16">
-              <div class="text-xs text-muted mb-8">Generated link</div>
-              <div class="link-box"><span class="link-text" id="gen-link">Connect wallet first</span><button
-                  class="copy-btn" onclick="copyText('gen-link')">Copy</button></div>
+
+            <!-- Preview (chưa save) -->
+            <div class="mb-12">
+              <div class="flex justify-between items-center mb-6">
+                <span class="text-xs text-muted">Preview URL</span>
+                <span class="text-xs" style="color:var(--p2);opacity:.7">· chưa lưu</span>
+              </div>
+              <div class="link-box">
+                <span class="link-text truncate" id="gen-link" style="font-size:11px">Connect wallet first</span>
+                <button class="copy-btn" onclick="copyText('gen-link')">Copy</button>
+              </div>
             </div>
+
             <div id="link-qr-wrap" class="text-center mb-16"></div>
-            <button class="btn btn-primary btn-full" onclick="savePaymentLink()">💾 Save & Share</button>
+
+            <!-- Nút Save — id="save-link-btn" để JS nhận đúng -->
+            <button class="btn btn-primary btn-full" id="save-link-btn" onclick="savePaymentLink()">
+              🔗 Save &amp; Get Short Link
+            </button>
+            <div class="text-xs text-muted mt-8" style="text-align:center">
+              Sau khi lưu bạn sẽ nhận được link rút gọn <code style="font-size:10px">?pay=xxxxxxxx</code>
+            </div>
           </div>
+
           <div class="card">
-            <div class="section-title">Active Links</div>
+            <div class="section-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+              </svg>
+              Active Links
+            </div>
             <div id="links-list">
               <div class="empty-state text-xs">No payment links yet</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- How it works -->
+        <div class="card mt-16">
+          <div class="fw600 mb-12">How it works</div>
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div class="step-item">
+              <div class="step-num">1</div>
+              <div>
+                <div class="fw600 text-sm">Điền thông tin &amp; nhấn Save</div>
+                <div class="text-xs text-muted">Nhập số tiền, ghi chú và thời gian hết hạn. Nhấn "Save &amp; Get Short Link".</div>
+              </div>
+            </div>
+            <div class="step-item">
+              <div class="step-num">2</div>
+              <div>
+                <div class="fw600 text-sm">Nhận short link rút gọn</div>
+                <div class="text-xs text-muted">Link dạng <code style="font-size:10px">yourapp.com/?pay=abc12345</code> được lưu lên Firebase. Chia sẻ link này cho bất kỳ ai.</div>
+              </div>
+            </div>
+            <div class="step-item">
+              <div class="step-num">3</div>
+              <div>
+                <div class="fw600 text-sm">Người nhận vào link → hiện modal thanh toán</div>
+                <div class="text-xs text-muted">App tự fetch thông tin từ Firebase, kiểm tra hết hạn, rồi hiển thị modal với QR + nút Pay Now. Expiry được kiểm tra thật sự.</div>
+              </div>
             </div>
           </div>
         </div>
