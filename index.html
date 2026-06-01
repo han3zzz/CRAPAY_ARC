@@ -613,7 +613,7 @@
             <div id="link-shorturl-wrap" style="display:none" class="mb-12">
               <div class="flex justify-between items-center mb-6">
                 <span class="text-xs fw600" style="color:var(--p2)">🔗 Short Link</span>
-                <span class="tag tag-green" style="font-size:10px">Đã lưu</span>
+                <span class="tag tag-green" style="font-size:10px">Saved</span>
               </div>
               <div class="link-box">
                 <span class="link-text truncate" id="gen-link" style="font-size:12px;font-weight:600"></span>
@@ -627,7 +627,7 @@
               🔗 Save &amp; Get Short Link
             </button>
             <div class="text-xs text-muted mt-8" style="text-align:center">
-              Link rút gọn dạng <code style="font-size:10px">?pay=xxxxxxxx</code> — lưu lên Firebase, check expiry thật
+              Link rút gọn dạng <code style="font-size:10px">?pay=xxxxxxxx</code>
             </div>
           </div>
 
@@ -651,22 +651,23 @@
             <div class="step-item">
               <div class="step-num">1</div>
               <div>
-                <div class="fw600 text-sm">Điền thông tin &amp; nhấn Save</div>
-                <div class="text-xs text-muted">Nhập số tiền, ghi chú và thời gian hết hạn. Nhấn "Save &amp; Get Short Link".</div>
+                <div class="fw600 text-sm">Fill in the information &amp; press Save</div>
+              <div class="text-xs text-muted">Enter the amount, notes, and expiration date. Press "Save & Get Short Link".</div>
               </div>
             </div>
             <div class="step-item">
               <div class="step-num">2</div>
               <div>
                 <div class="fw600 text-sm">Nhận short link rút gọn</div>
-                <div class="text-xs text-muted">Link dạng <code style="font-size:10px">yourapp.com/?pay=abc12345</code> được lưu lên Firebase. Chia sẻ link này cho bất kỳ ai.</div>
+               <div class="text-xs text-muted">Link in the format <code style="font-size:10px">yourapp.com/?pay=abc12345</code> is saved to the system. Share this link with anyone.</div>
               </div>
             </div>
             <div class="step-item">
               <div class="step-num">3</div>
               <div>
-                <div class="fw600 text-sm">Người nhận vào link → hiện modal thanh toán</div>
-                <div class="text-xs text-muted">App tự fetch thông tin từ Firebase, kiểm tra hết hạn, rồi hiển thị modal với QR + nút Pay Now. Expiry được kiểm tra thật sự.</div>
+        <div class="fw600 text-sm">The recipient clicks the link → the payment modal appears</div>
+
+<div class="text-xs text-muted">The app automatically fetches information from the system, checks for expiration, and then displays the modal with QR code and Pay Now button. The expiration date is verified.</div>
               </div>
             </div>
           </div>
