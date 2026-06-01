@@ -604,26 +604,30 @@
               </select>
             </div>
 
-            <!-- Preview (chưa save) -->
-            <div class="mb-12">
-              <div class="flex justify-between items-center mb-6">
-                <span class="text-xs text-muted">Preview URL</span>
-                <span class="text-xs" style="color:var(--p2);opacity:.7">· chưa lưu</span>
-              </div>
-              <div class="link-box">
-                <span class="link-text truncate" id="gen-link" style="font-size:11px">Connect wallet first</span>
-                <button class="copy-btn" onclick="copyText('gen-link')">Copy</button>
-              </div>
+            <!-- Preview card (không hiện URL dài) -->
+            <div id="link-preview-card" class="mb-12">
+              <div class="text-xs text-muted" style="padding:12px;text-align:center;opacity:.6">🔌 Connect wallet to preview</div>
             </div>
 
-            <div id="link-qr-wrap" class="text-center mb-16"></div>
+            <!-- Short link (chỉ hiện sau khi save) -->
+            <div id="link-shorturl-wrap" style="display:none" class="mb-12">
+              <div class="flex justify-between items-center mb-6">
+                <span class="text-xs fw600" style="color:var(--p2)">🔗 Short Link</span>
+                <span class="tag tag-green" style="font-size:10px">Đã lưu</span>
+              </div>
+              <div class="link-box">
+                <span class="link-text truncate" id="gen-link" style="font-size:12px;font-weight:600"></span>
+                <button class="copy-btn" onclick="copyText('gen-link')">Copy</button>
+              </div>
+              <div id="link-qr-wrap" class="text-center mt-12"></div>
+            </div>
 
             <!-- Nút Save — id="save-link-btn" để JS nhận đúng -->
             <button class="btn btn-primary btn-full" id="save-link-btn" onclick="savePaymentLink()">
               🔗 Save &amp; Get Short Link
             </button>
             <div class="text-xs text-muted mt-8" style="text-align:center">
-              Sau khi lưu bạn sẽ nhận được link rút gọn <code style="font-size:10px">?pay=xxxxxxxx</code>
+              Link rút gọn dạng <code style="font-size:10px">?pay=xxxxxxxx</code> — lưu lên Firebase, check expiry thật
             </div>
           </div>
 
