@@ -1405,32 +1405,53 @@ async function fbGetPublicLink(linkId: string): Promise<Record<string, any> | nu
 
 /** Cập nhật preview link ngay khi user nhập */
 function updateLinkPreview(): void {
-  const el = document.getElementById("gen-link");
-  if (!el) return;
+  const wrap = document.getElementById("link-preview-card");
+  if (!wrap) return;
+
   if (!state.address) {
-    el.textContent = "Connect wallet first";
+    wrap.innerHTML = `<div class="text-xs text-muted" style="padding:12px;text-align:center">🔌 Connect wallet to preview</div>`;
     return;
   }
-  const amount = (document.getElementById("link-amount") as HTMLInputElement)?.value ?? "";
-  const msg    = (document.getElementById("link-msg")    as HTMLInputElement)?.value ?? "";
+
+  const amount = (document.getElementById("link-amount") as HTMLInputElement)?.value.trim() ?? "";
+  const msg    = (document.getElementById("link-msg")    as HTMLInputElement)?.value.trim() ?? "";
   const token  = getActiveToken("link-token-tabs") ?? "USDC";
+  const expVal = (document.getElementById("link-exp")    as HTMLSelectElement)?.value ?? "0";
+  const expMs  = parseInt(expVal) || 0;
 
-  // Hiển thị preview dạng URL đầy đủ (chưa lưu)
-  const base = window.location.origin + window.location.pathname;
-  let previewUrl = `${base}?to=${encodeURIComponent(state.address)}`;
-  if (amount) previewUrl += `&amount=${encodeURIComponent(amount)}`;
-  previewUrl += `&token=${encodeURIComponent(token)}`;
-  if (msg) previewUrl += `&msg=${encodeURIComponent(msg)}`;
-  el.textContent = previewUrl;
+  const expiryLabel = expMs === 0 ? "Không hết hạn"
+    : expMs <= 3600000   ? "Hết hạn sau 1 giờ"
+    : expMs <= 86400000  ? "Hết hạn sau 24 giờ"
+    : expMs <= 604800000 ? "Hết hạn sau 7 ngày"
+    : "Hết hạn sau 30 ngày";
 
-  // QR preview
-  const wrap = document.getElementById("link-qr-wrap");
-  if (wrap) {
-    QRCode.toString(previewUrl, { type: "svg", width: 120 }, (err, svg) => {
-      if (!err && wrap)
-        wrap.innerHTML = `<div style="background:#fff;padding:10px;border-radius:10px;display:inline-block">${svg}</div>`;
-    });
-  }
+  const addrShort = state.address.slice(0,6) + "…" + state.address.slice(-4);
+  const amountDisplay = amount ? sanitize(amount) + " " + sanitize(token) : "Bất kỳ số tiền";
+  const msgHtml = msg ? `<div class="text-xs text-muted mt-2">${sanitize(msg)}</div>` : "";
+
+  wrap.innerHTML = `
+    <div style="background:var(--bg);border-radius:10px;padding:14px;border:1px solid var(--border)">
+      <div class="text-xs text-muted mb-10" style="letter-spacing:.05em;opacity:.6">XEM TRƯỚC</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div style="width:38px;height:38px;border-radius:50%;background:rgba(108,99,255,0.15);
+                    display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">💸</div>
+        <div>
+          <div class="fw600" style="font-size:16px">${amountDisplay}</div>
+          ${msgHtml}
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <span style="font-size:10px;padding:3px 8px;border-radius:20px;background:rgba(108,99,255,0.12);color:var(--p2)">
+          → ${addrShort}
+        </span>
+        <span style="font-size:10px;padding:3px 8px;border-radius:20px;background:rgba(255,255,255,0.05);color:var(--text3)">
+          ⏱ ${expiryLabel}
+        </span>
+      </div>
+      <div class="text-xs mt-10" style="color:var(--text3);opacity:.5">
+        Short link sẽ xuất hiện ở đây sau khi bạn nhấn Save ↓
+      </div>
+    </div>`;
 }
 (window as any).updateLinkPreview = updateLinkPreview;
 
@@ -1488,16 +1509,23 @@ async function savePaymentLink(): Promise<void> {
     renderLinks();
     toast("success", "Short payment link created!");
 
-    // Hiển thị short URL + QR
+    // Hiện khu vực short link + ẩn nút hint
+    const shortWrap = document.getElementById("link-shorturl-wrap");
+    if (shortWrap) shortWrap.style.display = "block";
+
     const el = document.getElementById("gen-link");
     if (el) el.textContent = shortUrl;
-    const wrap = document.getElementById("link-qr-wrap");
-    if (wrap) {
-      QRCode.toString(shortUrl, { type: "svg", width: 120 }, (err, svg) => {
-        if (!err && wrap)
-          wrap.innerHTML = `<div style="background:#fff;padding:10px;border-radius:10px;display:inline-block">${svg}</div>`;
+
+    const qrWrap = document.getElementById("link-qr-wrap");
+    if (qrWrap) {
+      QRCode.toString(shortUrl, { type: "svg", width: 130 }, (err, svg) => {
+        if (!err && qrWrap)
+          qrWrap.innerHTML = `<div style="background:#fff;padding:10px;border-radius:10px;display:inline-block">${svg}</div>`;
       });
     }
+
+    // Reset preview card
+    updateLinkPreview();
   } catch (e: any) {
     toast("error", e?.message ?? "Failed to create link");
   } finally {
@@ -1591,26 +1619,20 @@ async function checkPaymentLinkParam(): Promise<void> {
 (window as any).checkPaymentLinkParam = checkPaymentLinkParam;
 
 /** Hiển thị modal thông tin payment link (full screen đẹp) */
+// Lưu payload tạm thời — tránh inline JSON trong onclick gây lỗi parse
+let _pendingPayLinkData: { to: string; amount: string; token: string; msg: string } | null = null;
+
 function showPaymentLinkModal(data: Record<string, any>): void {
-  // Tạo/lấy overlay
   let overlay = document.getElementById("pay-link-overlay");
   if (!overlay) {
     overlay = document.createElement("div");
     overlay.id = "pay-link-overlay";
-    overlay.style.cssText = `
-      position:fixed;inset:0;z-index:9999;
-      display:flex;align-items:center;justify-content:center;
-      background:rgba(0,0,0,0.85);backdrop-filter:blur(6px);
-    `;
+    overlay.style.cssText = "position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.85);backdrop-filter:blur(6px)";
     document.body.appendChild(overlay);
   }
 
   if (data.loading) {
-    overlay.innerHTML = `
-      <div style="color:#fff;text-align:center">
-        <div style="font-size:32px;margin-bottom:12px">⏳</div>
-        <div class="text-sm">Loading payment info…</div>
-      </div>`;
+    overlay.innerHTML = `<div style="color:#fff;text-align:center"><div style="font-size:32px;margin-bottom:12px">⏳</div><div class="text-sm">Loading payment info…</div></div>`;
     return;
   }
 
@@ -1620,18 +1642,30 @@ function showPaymentLinkModal(data: Record<string, any>): void {
         <div style="font-size:48px;margin-bottom:16px">❌</div>
         <div class="fw600 mb-8">Link Unavailable</div>
         <div class="text-sm text-muted mb-20">${sanitize(data.error)}</div>
-        <button class="btn btn-primary btn-full" onclick="document.getElementById('pay-link-overlay').remove();history.replaceState(null,'',location.pathname)">
-          Go to App
-        </button>
+        <button class="btn btn-primary btn-full" id="pay-link-close-err">Go to App</button>
       </div>`;
+    document.getElementById("pay-link-close-err")?.addEventListener("click", () => {
+      overlay!.remove();
+      history.replaceState(null, "", location.pathname);
+    });
     return;
   }
 
   const expiryStr = data.expiresAt
     ? `Expires ${new Date(data.expiresAt).toLocaleString()}`
     : "No expiry";
-  const amountDisplay = data.amount ? `${sanitize(data.amount)} ${sanitize(data.token ?? "USDC")}` : "Any amount";
+  const amountDisplay = data.amount
+    ? `${sanitize(String(data.amount))} ${sanitize(data.token ?? "USDC")}`
+    : "Any amount";
   const qrTarget = `${location.origin}${location.pathname}?pay=${sanitize(data.linkId ?? "")}`;
+
+  // Lưu payload vào biến — không nhúng JSON vào onclick
+  _pendingPayLinkData = {
+    to:     String(data.to ?? ""),
+    amount: String(data.amount ?? ""),
+    token:  String(data.token ?? "USDC"),
+    msg:    String(data.msg ?? ""),
+  };
 
   overlay.innerHTML = `
     <div style="background:var(--card);border-radius:20px;padding:28px 24px;max-width:380px;width:92%;box-shadow:0 20px 60px rgba(0,0,0,0.4)">
@@ -1640,36 +1674,38 @@ function showPaymentLinkModal(data: Record<string, any>): void {
         <div style="font-size:20px;font-weight:700;color:var(--primary)">Payment Request</div>
         <div class="text-xs text-muted mt-4">⏱ ${sanitize(expiryStr)}</div>
       </div>
-
       <div style="background:var(--bg);border-radius:12px;padding:16px;margin-bottom:16px">
         <div class="text-xs text-muted mb-4">To</div>
         <div class="mono fw600" style="font-size:13px;word-break:break-all">${sanitize(data.to ?? "")}</div>
       </div>
-
       <div style="background:var(--bg);border-radius:12px;padding:16px;margin-bottom:16px;text-align:center">
         <div class="text-xs text-muted mb-4">Amount</div>
         <div style="font-size:28px;font-weight:700;color:var(--primary)">${amountDisplay}</div>
       </div>
-
-      ${data.msg ? `
-      <div style="background:var(--bg);border-radius:12px;padding:16px;margin-bottom:16px">
-        <div class="text-xs text-muted mb-4">Note</div>
-        <div class="text-sm">${sanitize(data.msg)}</div>
-      </div>` : ""}
-
+      ${data.msg ? `<div style="background:var(--bg);border-radius:12px;padding:16px;margin-bottom:16px"><div class="text-xs text-muted mb-4">Note</div><div class="text-sm">${sanitize(String(data.msg))}</div></div>` : ""}
       <div id="pay-link-qr" style="text-align:center;margin-bottom:16px"></div>
-
-      <button class="btn btn-primary btn-full mb-8" style="font-size:15px;padding:14px"
-        onclick="prefillAndSendFromLink(${JSON.stringify({ to: data.to, amount: data.amount ?? '', token: data.token ?? 'USDC', msg: data.msg ?? '' }).replace(/</g,'\\u003c')})">
-        Pay Now
-      </button>
-      <button class="btn btn-full" style="background:transparent;border:1px solid var(--border);font-size:13px"
-        onclick="document.getElementById('pay-link-overlay').remove();history.replaceState(null,'',location.pathname)">
-        Cancel
-      </button>
+      <button class="btn btn-primary btn-full mb-8" id="pay-link-pay-btn" style="font-size:15px;padding:14px">💸 Pay Now</button>
+      <button class="btn btn-full" id="pay-link-cancel-btn" style="background:transparent;border:1px solid var(--border);font-size:13px">Cancel</button>
     </div>`;
 
-  // Render QR vào #pay-link-qr
+  // Bind nút qua addEventListener — không inline JSON
+  document.getElementById("pay-link-pay-btn")?.addEventListener("click", () => {
+    overlay!.remove();
+    history.replaceState(null, "", location.pathname);
+    if (_pendingPayLinkData) {
+      const payload = { ..._pendingPayLinkData };
+      _pendingPayLinkData = null;
+      prefillAndSend(payload);
+    }
+  });
+
+  document.getElementById("pay-link-cancel-btn")?.addEventListener("click", () => {
+    overlay!.remove();
+    history.replaceState(null, "", location.pathname);
+    _pendingPayLinkData = null;
+  });
+
+  // Render QR
   const qrDiv = document.getElementById("pay-link-qr");
   if (qrDiv) {
     QRCode.toString(qrTarget, { type: "svg", width: 100 }, (err, svg) => {
