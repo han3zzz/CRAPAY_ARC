@@ -1419,19 +1419,19 @@ function updateLinkPreview(): void {
   const expVal = (document.getElementById("link-exp")    as HTMLSelectElement)?.value ?? "0";
   const expMs  = parseInt(expVal) || 0;
 
-  const expiryLabel = expMs === 0 ? "Không hết hạn"
-    : expMs <= 3600000   ? "Hết hạn sau 1 giờ"
-    : expMs <= 86400000  ? "Hết hạn sau 24 giờ"
-    : expMs <= 604800000 ? "Hết hạn sau 7 ngày"
-    : "Hết hạn sau 30 ngày";
+  const expiryLabel = expMs === 0 ? "No expiration date"
+    : expMs <= 3600000   ? "Expires in 1 hour"
+    : expMs <= 86400000  ? "Expires in 24 hour"
+    : expMs <= 604800000 ? "Expires in 7 days"
+    : "Expires after 30 days";
 
   const addrShort = state.address.slice(0,6) + "…" + state.address.slice(-4);
-  const amountDisplay = amount ? sanitize(amount) + " " + sanitize(token) : "Bất kỳ số tiền";
+  const amountDisplay = amount ? sanitize(amount) + " " + sanitize(token) : "Any amount";
   const msgHtml = msg ? `<div class="text-xs text-muted mt-2">${sanitize(msg)}</div>` : "";
 
   wrap.innerHTML = `
     <div style="background:var(--bg);border-radius:10px;padding:14px;border:1px solid var(--border)">
-      <div class="text-xs text-muted mb-10" style="letter-spacing:.05em;opacity:.6">XEM TRƯỚC</div>
+      <div class="text-xs text-muted mb-10" style="letter-spacing:.05em;opacity:.6">PREVIEW</div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
         <div style="width:38px;height:38px;border-radius:50%;background:rgba(108,99,255,0.15);
                     display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">💸</div>
@@ -1449,7 +1449,7 @@ function updateLinkPreview(): void {
         </span>
       </div>
       <div class="text-xs mt-10" style="color:var(--text3);opacity:.5">
-        Short link sẽ xuất hiện ở đây sau khi bạn nhấn Save ↓
+      
       </div>
     </div>`;
 }
