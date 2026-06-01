@@ -1379,27 +1379,54 @@ function prefillAndSend(data: any): void {
 (window as any).prefillAndSend = prefillAndSend;
 
 // ── Payment Links ──────────────────────────────────────────
-function updateLinkPreview() {
+
+/** Sinh short ID 8 ký tự alphanumeric */
+function genLinkId(): string {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  return Array.from(crypto.getRandomValues(new Uint8Array(8)))
+    .map((b) => chars[b % chars.length])
+    .join("");
+}
+
+/** Lưu payment link public lên collection "paymentLinks_pub" (không cần auth) */
+async function fbSavePublicLink(linkId: string, data: Record<string, any>): Promise<void> {
+  await setDoc(doc(db, "paymentLinks_pub", linkId), {
+    ...data,
+    createdAt: Date.now(),
+  });
+}
+
+/** Đọc public link từ Firestore theo linkId */
+async function fbGetPublicLink(linkId: string): Promise<Record<string, any> | null> {
+  const { getDoc } = await import("firebase/firestore");
+  const snap = await getDoc(doc(db, "paymentLinks_pub", linkId));
+  return snap.exists() ? (snap.data() as Record<string, any>) : null;
+}
+
+/** Cập nhật preview link ngay khi user nhập */
+function updateLinkPreview(): void {
   const el = document.getElementById("gen-link");
   if (!el) return;
   if (!state.address) {
     el.textContent = "Connect wallet first";
     return;
   }
-  const amount =
-    (document.getElementById("link-amount") as HTMLInputElement)?.value ?? "";
-  const msg =
-    (document.getElementById("link-msg") as HTMLInputElement)?.value ?? "";
-  const token = getActiveToken("link-token-tabs") ?? "USDC";
-  const base = window.location.href.split("?")[0];
-  let url = `${base}?to=${encodeURIComponent(state.address)}`;
-  if (amount) url += `&amount=${encodeURIComponent(amount)}`;
-  url += `&token=${encodeURIComponent(token)}`;
-  if (msg) url += `&msg=${encodeURIComponent(msg)}`;
-  el.textContent = url;
+  const amount = (document.getElementById("link-amount") as HTMLInputElement)?.value ?? "";
+  const msg    = (document.getElementById("link-msg")    as HTMLInputElement)?.value ?? "";
+  const token  = getActiveToken("link-token-tabs") ?? "USDC";
+
+  // Hiển thị preview dạng URL đầy đủ (chưa lưu)
+  const base = window.location.origin + window.location.pathname;
+  let previewUrl = `${base}?to=${encodeURIComponent(state.address)}`;
+  if (amount) previewUrl += `&amount=${encodeURIComponent(amount)}`;
+  previewUrl += `&token=${encodeURIComponent(token)}`;
+  if (msg) previewUrl += `&msg=${encodeURIComponent(msg)}`;
+  el.textContent = previewUrl;
+
+  // QR preview
   const wrap = document.getElementById("link-qr-wrap");
   if (wrap) {
-    QRCode.toString(url, { type: "svg", width: 120 }, (err, svg) => {
+    QRCode.toString(previewUrl, { type: "svg", width: 120 }, (err, svg) => {
       if (!err && wrap)
         wrap.innerHTML = `<div style="background:#fff;padding:10px;border-radius:10px;display:inline-block">${svg}</div>`;
     });
@@ -1407,72 +1434,258 @@ function updateLinkPreview() {
 }
 (window as any).updateLinkPreview = updateLinkPreview;
 
-async function savePaymentLink() {
-  if (!state.address) {
-    requireWallet();
-    return;
+/**
+ * Tạo short link thực sự:
+ *  1. Sinh linkId ngắn
+ *  2. Lưu data lên Firestore collection "paymentLinks_pub"
+ *  3. Short URL = <base>?pay=<linkId>
+ *  4. Lưu vào user's paymentLinks collection để quản lý
+ */
+async function savePaymentLink(): Promise<void> {
+  if (!state.address) { requireWallet(); return; }
+
+  const amount   = (document.getElementById("link-amount") as HTMLInputElement)?.value.trim() ?? "";
+  const msg      = (document.getElementById("link-msg")    as HTMLInputElement)?.value.trim() ?? "";
+  const token    = getActiveToken("link-token-tabs") ?? "USDC";
+  const expValue = (document.getElementById("link-exp")    as HTMLSelectElement | HTMLInputElement)?.value ?? "0";
+  const expMs    = parseInt(expValue) || 0; // ms offset, 0 = no expiry
+
+  const btn = document.getElementById("save-link-btn") as HTMLButtonElement | null;
+  if (btn) { btn.disabled = true; btn.textContent = "Creating…"; }
+
+  try {
+    const linkId    = genLinkId();
+    const base      = window.location.origin + window.location.pathname;
+    const shortUrl  = `${base}?pay=${linkId}`;
+    const expiresAt = expMs ? Date.now() + expMs : null;
+
+    // Dữ liệu public — ai vào link cũng đọc được
+    const publicData = {
+      to: state.address,
+      amount,
+      token,
+      msg,
+      expiresAt,
+      ownerAddress: state.address.toLowerCase(),
+    };
+    await fbSavePublicLink(linkId, publicData);
+
+    // Lưu vào danh sách của user để quản lý
+    const userLink = {
+      id: linkId,
+      shortUrl,
+      amount,
+      token,
+      msg,
+      active: true,
+      createdAt: Date.now(),
+      expiresAt,
+    };
+    await fbSave("paymentLinks", userLink);
+    state.paymentLinks.unshift(userLink);
+
+    // Cập nhật UI
+    renderLinks();
+    toast("success", "Short payment link created!");
+
+    // Hiển thị short URL + QR
+    const el = document.getElementById("gen-link");
+    if (el) el.textContent = shortUrl;
+    const wrap = document.getElementById("link-qr-wrap");
+    if (wrap) {
+      QRCode.toString(shortUrl, { type: "svg", width: 120 }, (err, svg) => {
+        if (!err && wrap)
+          wrap.innerHTML = `<div style="background:#fff;padding:10px;border-radius:10px;display:inline-block">${svg}</div>`;
+      });
+    }
+  } catch (e: any) {
+    toast("error", e?.message ?? "Failed to create link");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "💾 Save & Get Short Link"; }
   }
-  const urlEl = document.getElementById("gen-link");
-  const url = urlEl?.textContent ?? "";
-  if (!url || url === "Connect wallet first") {
-    toast("error", "Generate a link first");
-    return;
-  }
-  const amount =
-    (document.getElementById("link-amount") as HTMLInputElement)?.value ?? "";
-  const msg =
-    (document.getElementById("link-msg") as HTMLInputElement)?.value ?? "";
-  const token = getActiveToken("link-token-tabs") ?? "USDC";
-  const expMs =
-    parseInt(
-      (document.getElementById("link-exp") as HTMLInputElement)?.value ?? "0",
-    ) || 0;
-  const link = {
-    id: Date.now(),
-    url,
-    amount,
-    token,
-    msg,
-    active: true,
-    createdAt: Date.now(),
-    expiresAt: expMs ? Date.now() + expMs : null,
-  };
-  await fbSave("paymentLinks", link);
-  state.paymentLinks.unshift(link);
-  renderLinks();
-  toast("success", "Payment link saved!");
 }
 (window as any).savePaymentLink = savePaymentLink;
 
-function renderLinks() {
+function renderLinks(): void {
   const el = document.getElementById("links-list");
   if (!el) return;
   if (!state.paymentLinks.length) {
-    el.innerHTML =
-      '<div class="empty-state text-xs">No payment links yet</div>';
+    el.innerHTML = '<div class="empty-state text-xs">No payment links yet</div>';
     return;
   }
   el.innerHTML = state.paymentLinks
     .map((l) => {
-      const expired = l.expiresAt && Date.now() > l.expiresAt;
-      const status = expired ? "tag-gray" : l.active ? "tag-green" : "tag-gray";
+      const expired    = l.expiresAt && Date.now() > l.expiresAt;
+      const status     = expired ? "tag-gray" : l.active ? "tag-green" : "tag-gray";
       const statusText = expired ? "Expired" : l.active ? "Active" : "Inactive";
-      const safeUrl = sanitize(l.url ?? "");
+
+      // Ưu tiên shortUrl, fallback url cũ
+      const displayUrl = sanitize(l.shortUrl ?? l.url ?? "");
+      const expiryTxt  = l.expiresAt
+        ? `Expires ${new Date(l.expiresAt).toLocaleString()}`
+        : "No expiry";
+
       return `<div class="card-inner mb-8">
-      <div class="flex justify-between items-center mb-8">
-        <span class="fw600 text-sm">${l.amount ? sanitize(l.amount) + " " + sanitize(l.token) : "Any amount"}</span>
-        <span class="tag ${status}">${statusText}</span>
-      </div>
-      ${l.msg ? `<div class="text-xs text-muted mb-8">${sanitize(l.msg)}</div>` : ""}
-      <div class="link-box" style="padding:8px">
-        <span class="link-text truncate" style="font-size:11px">${safeUrl}</span>
-        <button class="copy-btn" data-copy="${safeUrl}" onclick="copyVal(this.dataset.copy)">Copy</button>
-      </div>
-    </div>`;
+        <div class="flex justify-between items-center mb-8">
+          <span class="fw600 text-sm">${l.amount ? sanitize(l.amount) + " " + sanitize(l.token) : "Any amount"}</span>
+          <span class="tag ${status}">${statusText}</span>
+        </div>
+        ${l.msg ? `<div class="text-xs text-muted mb-4">${sanitize(l.msg)}</div>` : ""}
+        <div class="text-xs text-muted mb-8">⏱ ${sanitize(expiryTxt)}</div>
+        <div class="link-box" style="padding:8px">
+          <span class="link-text truncate" style="font-size:11px">${displayUrl}</span>
+          <button class="copy-btn" data-copy="${displayUrl}" onclick="copyVal(this.dataset.copy)">Copy</button>
+        </div>
+        <button class="btn btn-sm mt-8" style="font-size:11px;padding:4px 10px;color:var(--red);background:transparent;border:1px solid var(--border)"
+          onclick="deletePaymentLink('${sanitize(String(l.id))}')">🗑 Delete</button>
+      </div>`;
     })
     .join("");
 }
 (window as any).renderLinks = renderLinks;
+
+async function deletePaymentLink(id: string): Promise<void> {
+  try {
+    // Xóa public link
+    await import("firebase/firestore").then(({ deleteDoc: _del }) =>
+      _del(doc(db, "paymentLinks_pub", id))
+    );
+    // Xóa user record
+    await fbDelete("paymentLinks", id);
+    state.paymentLinks = state.paymentLinks.filter((l) => String(l.id) !== id);
+    renderLinks();
+    toast("info", "Payment link deleted");
+  } catch (e: any) {
+    toast("error", e?.message ?? "Delete failed");
+  }
+}
+(window as any).deletePaymentLink = deletePaymentLink;
+
+/**
+ * Kiểm tra ?pay=<linkId> khi load trang.
+ * Nếu có → fetch data từ Firestore → hiển thị modal thanh toán đẹp.
+ */
+async function checkPaymentLinkParam(): Promise<void> {
+  const p = new URLSearchParams(window.location.search);
+  const linkId = p.get("pay");
+  if (!linkId) return;
+
+  // Hiện loading overlay
+  showPaymentLinkModal({ loading: true } as any);
+
+  try {
+    const data = await fbGetPublicLink(linkId);
+    if (!data) {
+      showPaymentLinkModal({ error: "Link not found or deleted" } as any);
+      return;
+    }
+    if (data.expiresAt && Date.now() > data.expiresAt) {
+      showPaymentLinkModal({ error: "This payment link has expired" } as any);
+      return;
+    }
+    showPaymentLinkModal({ ...data, linkId });
+  } catch (e: any) {
+    showPaymentLinkModal({ error: e?.message ?? "Failed to load link" } as any);
+  }
+}
+(window as any).checkPaymentLinkParam = checkPaymentLinkParam;
+
+/** Hiển thị modal thông tin payment link (full screen đẹp) */
+function showPaymentLinkModal(data: Record<string, any>): void {
+  // Tạo/lấy overlay
+  let overlay = document.getElementById("pay-link-overlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "pay-link-overlay";
+    overlay.style.cssText = `
+      position:fixed;inset:0;z-index:9999;
+      display:flex;align-items:center;justify-content:center;
+      background:rgba(0,0,0,0.85);backdrop-filter:blur(6px);
+    `;
+    document.body.appendChild(overlay);
+  }
+
+  if (data.loading) {
+    overlay.innerHTML = `
+      <div style="color:#fff;text-align:center">
+        <div style="font-size:32px;margin-bottom:12px">⏳</div>
+        <div class="text-sm">Loading payment info…</div>
+      </div>`;
+    return;
+  }
+
+  if (data.error) {
+    overlay.innerHTML = `
+      <div style="background:var(--card);border-radius:20px;padding:32px 24px;max-width:360px;width:90%;text-align:center">
+        <div style="font-size:48px;margin-bottom:16px">❌</div>
+        <div class="fw600 mb-8">Link Unavailable</div>
+        <div class="text-sm text-muted mb-20">${sanitize(data.error)}</div>
+        <button class="btn btn-primary btn-full" onclick="document.getElementById('pay-link-overlay').remove();history.replaceState(null,'',location.pathname)">
+          Go to App
+        </button>
+      </div>`;
+    return;
+  }
+
+  const expiryStr = data.expiresAt
+    ? `Expires ${new Date(data.expiresAt).toLocaleString()}`
+    : "No expiry";
+  const amountDisplay = data.amount ? `${sanitize(data.amount)} ${sanitize(data.token ?? "USDC")}` : "Any amount";
+  const qrTarget = `${location.origin}${location.pathname}?pay=${sanitize(data.linkId ?? "")}`;
+
+  overlay.innerHTML = `
+    <div style="background:var(--card);border-radius:20px;padding:28px 24px;max-width:380px;width:92%;box-shadow:0 20px 60px rgba(0,0,0,0.4)">
+      <div style="text-align:center;margin-bottom:20px">
+        <div style="font-size:40px;margin-bottom:8px">💸</div>
+        <div style="font-size:20px;font-weight:700;color:var(--primary)">Payment Request</div>
+        <div class="text-xs text-muted mt-4">⏱ ${sanitize(expiryStr)}</div>
+      </div>
+
+      <div style="background:var(--bg);border-radius:12px;padding:16px;margin-bottom:16px">
+        <div class="text-xs text-muted mb-4">To</div>
+        <div class="mono fw600" style="font-size:13px;word-break:break-all">${sanitize(data.to ?? "")}</div>
+      </div>
+
+      <div style="background:var(--bg);border-radius:12px;padding:16px;margin-bottom:16px;text-align:center">
+        <div class="text-xs text-muted mb-4">Amount</div>
+        <div style="font-size:28px;font-weight:700;color:var(--primary)">${amountDisplay}</div>
+      </div>
+
+      ${data.msg ? `
+      <div style="background:var(--bg);border-radius:12px;padding:16px;margin-bottom:16px">
+        <div class="text-xs text-muted mb-4">Note</div>
+        <div class="text-sm">${sanitize(data.msg)}</div>
+      </div>` : ""}
+
+      <div id="pay-link-qr" style="text-align:center;margin-bottom:16px"></div>
+
+      <button class="btn btn-primary btn-full mb-8" style="font-size:15px;padding:14px"
+        onclick="prefillAndSendFromLink(${JSON.stringify({ to: data.to, amount: data.amount ?? '', token: data.token ?? 'USDC', msg: data.msg ?? '' }).replace(/</g,'\\u003c')})">
+        Pay Now
+      </button>
+      <button class="btn btn-full" style="background:transparent;border:1px solid var(--border);font-size:13px"
+        onclick="document.getElementById('pay-link-overlay').remove();history.replaceState(null,'',location.pathname)">
+        Cancel
+      </button>
+    </div>`;
+
+  // Render QR vào #pay-link-qr
+  const qrDiv = document.getElementById("pay-link-qr");
+  if (qrDiv) {
+    QRCode.toString(qrTarget, { type: "svg", width: 100 }, (err, svg) => {
+      if (!err && qrDiv)
+        qrDiv.innerHTML = `<div style="background:#fff;padding:8px;border-radius:10px;display:inline-block">${svg}</div>`;
+    });
+  }
+}
+(window as any).showPaymentLinkModal = showPaymentLinkModal;
+
+function prefillAndSendFromLink(data: { to: string; amount: string; token: string; msg: string }): void {
+  document.getElementById("pay-link-overlay")?.remove();
+  history.replaceState(null, "", location.pathname);
+  prefillAndSend(data);
+}
+(window as any).prefillAndSendFromLink = prefillAndSendFromLink;
 
 // ── Scheduled Payments ─────────────────────────────────────
 async function doAddSchedule() {
@@ -2987,18 +3200,24 @@ function closeModal(): void {
 (window as any).closeModal = closeModal;
 
 // ── Deep Link ──────────────────────────────────────────────
-function checkDeepLink() {
+function checkDeepLink(): void {
   const p = new URLSearchParams(window.location.search);
+
+  // ?pay=<linkId> → short payment link (Firebase lookup)
+  if (p.get("pay")) {
+    checkPaymentLinkParam();
+    return;
+  }
+
+  // ?to=<address> → legacy direct payment link
   if (!p.get("to")) return;
   nav("send");
-  const toEl = document.getElementById("send-to") as HTMLInputElement | null;
-  const amountEl = document.getElementById(
-    "send-amount",
-  ) as HTMLInputElement | null;
-  const msgEl = document.getElementById("send-msg") as HTMLInputElement | null;
-  if (toEl) toEl.value = p.get("to") ?? "";
+  const toEl     = document.getElementById("send-to")     as HTMLInputElement | null;
+  const amountEl = document.getElementById("send-amount") as HTMLInputElement | null;
+  const msgEl    = document.getElementById("send-msg")    as HTMLInputElement | null;
+  if (toEl)     toEl.value     = p.get("to") ?? "";
   if (amountEl) amountEl.value = p.get("amount") ?? "";
-  if (msgEl) msgEl.value = decodeURIComponent(p.get("msg") ?? "");
+  if (msgEl)    msgEl.value    = decodeURIComponent(p.get("msg") ?? "");
   const token = p.get("token") ?? "USDC";
   document.querySelectorAll("#send-token-tabs .token-tab").forEach((t) => {
     const tab = t as HTMLElement;
