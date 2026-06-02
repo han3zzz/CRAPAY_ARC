@@ -112,11 +112,14 @@ const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp, "hanzzz");
 
 // ── Relayer address cache ──────────────────────────────────
+// Đặt đúng URL Render server của bạn vào đây
+const SERVER_URL = "https://crapay.onrender.com"
+
 let _relayerAddress: string | null = null
 async function getRelayerAddress(): Promise<string | null> {
   if (_relayerAddress) return _relayerAddress
   try {
-    const res = await fetch("/config")
+    const res = await fetch(`${SERVER_URL}/config`)
     const data = await res.json()
     _relayerAddress = data.relayerAddress ?? null
   } catch { _relayerAddress = null }
