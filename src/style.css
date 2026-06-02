@@ -911,10 +911,6 @@ body::before{
 .mobile-nav-item.active svg{filter:drop-shadow(0 0 5px rgba(108,92,231,0.5))}
 
 /* ── Safe area ──────────────────────────────────────────── */
-@supports(padding-bottom:env(safe-area-inset-bottom)){
-  .main{padding-bottom:calc(72px + env(safe-area-inset-bottom))}
-  .mobile-nav{padding-bottom:env(safe-area-inset-bottom);height:calc(64px + env(safe-area-inset-bottom))}
-}
 
 /* ══════════════════════════════════════════════════════════
    MEDIA QUERIES
