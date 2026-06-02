@@ -271,15 +271,23 @@ async function fbSave(sub: string, item: any): Promise<void> {
   if (!state.address) throw new Error("Wallet not connected");
   const id = String(item.id ?? item._fbId ?? Date.now());
   const { _fbId, ...rest } = item;
-  await setDoc(
-    userDocRef(sub, id),
-    {
-      ...rest,
-      ownerAddress: state.address.toLowerCase(),
-      updatedAt: Date.now(),
-    },
-    { merge: true },
-  );
+  const ref = userDocRef(sub, id);
+  console.log("[fbSave] path:", ref.path, "data:", { ...rest, ownerAddress: state.address.toLowerCase() });
+  try {
+    await setDoc(
+      ref,
+      {
+        ...rest,
+        ownerAddress: state.address.toLowerCase(),
+        updatedAt: Date.now(),
+      },
+      { merge: true },
+    );
+    console.log("[fbSave] ✅ saved:", ref.path);
+  } catch (e: any) {
+    console.error("[fbSave] ❌ error:", e?.code, e?.message);
+    throw e;
+  }
 }
 
 async function fbDelete(sub: string, id: string | number): Promise<void> {
