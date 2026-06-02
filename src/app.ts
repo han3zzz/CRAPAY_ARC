@@ -10,9 +10,11 @@ import {
   query,
   where,
   getDocs,
+  getDoc,
   deleteDoc,
   doc,
   setDoc,
+  collectionGroup,
   writeBatch,
 } from "firebase/firestore";
 
@@ -108,6 +110,18 @@ const firebaseConfig = {
 };
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp, "hanzzz");
+
+// ── Relayer address cache ──────────────────────────────────
+let _relayerAddress: string | null = null
+async function getRelayerAddress(): Promise<string | null> {
+  if (_relayerAddress) return _relayerAddress
+  try {
+    const res = await fetch("/config")
+    const data = await res.json()
+    _relayerAddress = data.relayerAddress ?? null
+  } catch { _relayerAddress = null }
+  return _relayerAddress
+}
 
 // ── State ──────────────────────────────────────────────────
 let isBooting = true;
@@ -1379,349 +1393,116 @@ function prefillAndSend(data: any): void {
 (window as any).prefillAndSend = prefillAndSend;
 
 // ── Payment Links ──────────────────────────────────────────
-
-/** Sinh short ID 8 ký tự alphanumeric */
-function genLinkId(): string {
-  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  return Array.from(crypto.getRandomValues(new Uint8Array(8)))
-    .map((b) => chars[b % chars.length])
-    .join("");
-}
-
-/** Lưu payment link public lên collection "paymentLinks_pub" (không cần auth) */
-async function fbSavePublicLink(linkId: string, data: Record<string, any>): Promise<void> {
-  await setDoc(doc(db, "paymentLinks_pub", linkId), {
-    ...data,
-    createdAt: Date.now(),
-  });
-}
-
-/** Đọc public link từ Firestore theo linkId */
-async function fbGetPublicLink(linkId: string): Promise<Record<string, any> | null> {
-  const { getDoc } = await import("firebase/firestore");
-  const snap = await getDoc(doc(db, "paymentLinks_pub", linkId));
-  return snap.exists() ? (snap.data() as Record<string, any>) : null;
-}
-
-/** Cập nhật preview link ngay khi user nhập */
-function updateLinkPreview(): void {
-  const wrap = document.getElementById("link-preview-card");
-  if (!wrap) return;
-
+function updateLinkPreview() {
+  const el = document.getElementById("gen-link");
+  if (!el) return;
   if (!state.address) {
-    wrap.innerHTML = `<div class="text-xs text-muted" style="padding:12px;text-align:center">🔌 Connect wallet to preview</div>`;
+    el.textContent = "Connect wallet first";
     return;
   }
-
-  const amount = (document.getElementById("link-amount") as HTMLInputElement)?.value.trim() ?? "";
-  const msg    = (document.getElementById("link-msg")    as HTMLInputElement)?.value.trim() ?? "";
+  // Chỉ hiện preview placeholder — short link thật tạo sau khi Save
+  const amount = (document.getElementById("link-amount") as HTMLInputElement)?.value ?? "";
   const token  = getActiveToken("link-token-tabs") ?? "USDC";
-  const expVal = (document.getElementById("link-exp")    as HTMLSelectElement)?.value ?? "0";
-  const expMs  = parseInt(expVal) || 0;
-
-  const expiryLabel = expMs === 0 ? "No expiration date"
-    : expMs <= 3600000   ? "Expires in 1 hour"
-    : expMs <= 86400000  ? "Expires in 24 hour"
-    : expMs <= 604800000 ? "Expires in 7 days"
-    : "Expires after 30 days";
-
-  const addrShort = state.address.slice(0,6) + "…" + state.address.slice(-4);
-  const amountDisplay = amount ? sanitize(amount) + " " + sanitize(token) : "Any amount";
-  const msgHtml = msg ? `<div class="text-xs text-muted mt-2">${sanitize(msg)}</div>` : "";
-
-  wrap.innerHTML = `
-    <div style="background:var(--bg);border-radius:10px;padding:14px;border:1px solid var(--border)">
-      <div class="text-xs text-muted mb-10" style="letter-spacing:.05em;opacity:.6">PREVIEW</div>
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-        <div style="width:38px;height:38px;border-radius:50%;background:rgba(108,99,255,0.15);
-                    display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">💸</div>
-        <div>
-          <div class="fw600" style="font-size:16px">${amountDisplay}</div>
-          ${msgHtml}
-        </div>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <span style="font-size:10px;padding:3px 8px;border-radius:20px;background:rgba(108,99,255,0.12);color:var(--p2)">
-          → ${addrShort}
-        </span>
-        <span style="font-size:10px;padding:3px 8px;border-radius:20px;background:rgba(255,255,255,0.05);color:var(--text3)">
-          ⏱ ${expiryLabel}
-        </span>
-      </div>
-      <div class="text-xs mt-10" style="color:var(--text3);opacity:.5">
-      
-      </div>
-    </div>`;
+  const base   = window.location.origin + window.location.pathname;
+  el.textContent = amount
+    ? `${base}?pay=[id] — ${amount} ${token}`
+    : `${base}?pay=[id] — Any amount`;
 }
 (window as any).updateLinkPreview = updateLinkPreview;
 
-/**
- * Tạo short link thực sự:
- *  1. Sinh linkId ngắn
- *  2. Lưu data lên Firestore collection "paymentLinks_pub"
- *  3. Short URL = <base>?pay=<linkId>
- *  4. Lưu vào user's paymentLinks collection để quản lý
- */
-async function savePaymentLink(): Promise<void> {
+async function savePaymentLink() {
   if (!state.address) { requireWallet(); return; }
 
-  const amount   = (document.getElementById("link-amount") as HTMLInputElement)?.value.trim() ?? "";
-  const msg      = (document.getElementById("link-msg")    as HTMLInputElement)?.value.trim() ?? "";
-  const token    = getActiveToken("link-token-tabs") ?? "USDC";
-  const expValue = (document.getElementById("link-exp")    as HTMLSelectElement | HTMLInputElement)?.value ?? "0";
-  const expMs    = parseInt(expValue) || 0; // ms offset, 0 = no expiry
+  const amount = (document.getElementById("link-amount") as HTMLInputElement)?.value ?? "";
+  const msg    = (document.getElementById("link-msg")    as HTMLInputElement)?.value ?? "";
+  const token  = getActiveToken("link-token-tabs") ?? "USDC";
+  const expMs  = parseInt((document.getElementById("link-exp") as HTMLInputElement)?.value ?? "0") || 0;
 
-  const btn = document.getElementById("save-link-btn") as HTMLButtonElement | null;
-  if (btn) { btn.disabled = true; btn.textContent = "Creating…"; }
+  // Tạo short ID 8 ký tự
+  const shortId = Math.random().toString(36).slice(2, 10);
+  const base    = window.location.origin + window.location.pathname;
+  const shortUrl = `${base}?pay=${shortId}`;
 
-  try {
-    const linkId    = genLinkId();
-    const base      = window.location.origin + window.location.pathname;
-    const shortUrl  = `${base}?pay=${linkId}`;
-    const expiresAt = expMs ? Date.now() + expMs : null;
+  const link = {
+    id:          shortId,
+    shortUrl,
+    to:          state.address,
+    amount,
+    token,
+    msg,
+    active:      true,
+    createdAt:   Date.now(),
+    expiresAt:   expMs ? Date.now() + expMs : null,
+    ownerAddress: state.address.toLowerCase(),
+  };
 
-    // Dữ liệu public — ai vào link cũng đọc được
-    const publicData = {
-      to: state.address,
-      amount,
-      token,
-      msg,
-      expiresAt,
-      ownerAddress: state.address.toLowerCase(),
-    };
-    await fbSavePublicLink(linkId, publicData);
+  // Lưu vào top-level collection "paymentLinks" để ai cũng query được
+  await setDoc(doc(db, "paymentLinks", shortId), link);
 
-    // Lưu vào danh sách của user để quản lý
-    const userLink = {
-      id: linkId,
-      shortUrl,
-      amount,
-      token,
-      msg,
-      active: true,
-      createdAt: Date.now(),
-      expiresAt,
-    };
-    await fbSave("paymentLinks", userLink);
-    state.paymentLinks.unshift(userLink);
+  // Lưu vào user collection để hiện trong danh sách của user
+  await fbSave("paymentLinks", { ...link, id: shortId });
 
-    // Cập nhật UI
-    renderLinks();
-    toast("success", "Short payment link created!");
+  state.paymentLinks.unshift({ ...link, id: shortId });
+  renderLinks();
 
-    // Hiện khu vực short link + ẩn nút hint
-    const shortWrap = document.getElementById("link-shorturl-wrap");
-    if (shortWrap) shortWrap.style.display = "block";
-
-    const el = document.getElementById("gen-link");
-    if (el) el.textContent = shortUrl;
-
-    const qrWrap = document.getElementById("link-qr-wrap");
-    if (qrWrap) {
-      QRCode.toString(shortUrl, { type: "svg", width: 130 }, (err, svg) => {
-        if (!err && qrWrap)
-          qrWrap.innerHTML = `<div style="background:#fff;padding:10px;border-radius:10px;display:inline-block">${svg}</div>`;
-      });
-    }
-
-    // Reset preview card
-    updateLinkPreview();
-  } catch (e: any) {
-    toast("error", e?.message ?? "Failed to create link");
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = "💾 Save & Get Short Link"; }
+  // Hiện short link + QR
+  const el = document.getElementById("gen-link");
+  if (el) el.textContent = shortUrl;
+  const wrap = document.getElementById("link-qr-wrap");
+  if (wrap) {
+    QRCode.toString(shortUrl, { type: "svg", width: 140 }, (err: any, svg: string) => {
+      if (!err && wrap)
+        wrap.innerHTML = `<div style="background:#fff;padding:12px;border-radius:12px;display:inline-block">${svg}</div>`;
+    });
   }
+
+  toast("success", "Payment link created!");
 }
 (window as any).savePaymentLink = savePaymentLink;
 
-function renderLinks(): void {
+function renderLinks() {
   const el = document.getElementById("links-list");
   if (!el) return;
   if (!state.paymentLinks.length) {
     el.innerHTML = '<div class="empty-state text-xs">No payment links yet</div>';
     return;
   }
-  el.innerHTML = state.paymentLinks
-    .map((l) => {
-      const expired    = l.expiresAt && Date.now() > l.expiresAt;
-      const status     = expired ? "tag-gray" : l.active ? "tag-green" : "tag-gray";
-      const statusText = expired ? "Expired" : l.active ? "Active" : "Inactive";
-
-      // Ưu tiên shortUrl, fallback url cũ
-      const displayUrl = sanitize(l.shortUrl ?? l.url ?? "");
-      const expiryTxt  = l.expiresAt
-        ? `Expires ${new Date(l.expiresAt).toLocaleString()}`
-        : "No expiry";
-
-      return `<div class="card-inner mb-8">
-        <div class="flex justify-between items-center mb-8">
-          <span class="fw600 text-sm">${l.amount ? sanitize(l.amount) + " " + sanitize(l.token) : "Any amount"}</span>
-          <span class="tag ${status}">${statusText}</span>
-        </div>
-        ${l.msg ? `<div class="text-xs text-muted mb-4">${sanitize(l.msg)}</div>` : ""}
-        <div class="text-xs text-muted mb-8">⏱ ${sanitize(expiryTxt)}</div>
-        <div class="link-box" style="padding:8px">
-          <span class="link-text truncate" style="font-size:11px">${displayUrl}</span>
-          <button class="copy-btn" data-copy="${displayUrl}" onclick="copyVal(this.dataset.copy)">Copy</button>
-        </div>
-        <button class="btn btn-sm mt-8" style="font-size:11px;padding:4px 10px;color:var(--red);background:transparent;border:1px solid var(--border)"
-          onclick="deletePaymentLink('${sanitize(String(l.id))}')">🗑 Delete</button>
-      </div>`;
-    })
-    .join("");
+  el.innerHTML = state.paymentLinks.map((l) => {
+    const expired     = l.expiresAt && Date.now() > l.expiresAt;
+    const status      = expired ? "tag-gray" : l.active ? "tag-green" : "tag-gray";
+    const statusText  = expired ? "Expired" : l.active ? "Active" : "Inactive";
+    const displayUrl  = sanitize(l.shortUrl ?? l.url ?? "");
+    const expLabel    = l.expiresAt
+      ? (expired ? "Expired " : "Expires ") + fmtDate(l.expiresAt)
+      : "No expiry";
+    return `<div class="card-inner mb-8">
+      <div class="flex justify-between items-center mb-8">
+        <span class="fw600 text-sm">${l.amount ? sanitize(l.amount) + " " + sanitize(l.token ?? "USDC") : "Any amount"}</span>
+        <span class="tag ${status}">${statusText}</span>
+      </div>
+      ${l.msg ? `<div class="text-xs text-muted mb-4">${sanitize(l.msg)}</div>` : ""}
+      <div class="text-xs text-muted mb-8">🕐 ${expLabel}</div>
+      <div class="link-box" style="padding:8px">
+        <span class="link-text truncate" style="font-size:11px">${displayUrl}</span>
+        <button class="copy-btn" data-copy="${displayUrl}" onclick="copyVal(this.dataset.copy)">Copy</button>
+      </div>
+      ${expired ? "" : `<button class="btn btn-danger btn-sm w-full mt-8" onclick="deletePaymentLink('${sanitize(String(l.id))}')">🗑 Delete</button>`}
+    </div>`;
+  }).join("");
 }
 (window as any).renderLinks = renderLinks;
 
-async function deletePaymentLink(id: string): Promise<void> {
-  try {
-    // Xóa public link
-    await import("firebase/firestore").then(({ deleteDoc: _del }) =>
-      _del(doc(db, "paymentLinks_pub", id))
-    );
-    // Xóa user record
-    await fbDelete("paymentLinks", id);
-    state.paymentLinks = state.paymentLinks.filter((l) => String(l.id) !== id);
-    renderLinks();
-    toast("info", "Payment link deleted");
-  } catch (e: any) {
-    toast("error", e?.message ?? "Delete failed");
-  }
+async function deletePaymentLink(id: string) {
+  // Xóa khỏi top-level + user collection
+  await Promise.all([
+    deleteDoc(doc(db, "paymentLinks", id)),
+    deleteDoc(doc(db, "users", state.address!.toLowerCase(), "paymentLinks", id)),
+  ]);
+  state.paymentLinks = state.paymentLinks.filter((l) => String(l.id) !== id);
+  renderLinks();
+  toast("success", "Link deleted");
 }
 (window as any).deletePaymentLink = deletePaymentLink;
-
-/**
- * Kiểm tra ?pay=<linkId> khi load trang.
- * Nếu có → fetch data từ Firestore → hiển thị modal thanh toán đẹp.
- */
-async function checkPaymentLinkParam(): Promise<void> {
-  const p = new URLSearchParams(window.location.search);
-  const linkId = p.get("pay");
-  if (!linkId) return;
-
-  // Hiện loading overlay
-  showPaymentLinkModal({ loading: true } as any);
-
-  try {
-    const data = await fbGetPublicLink(linkId);
-    if (!data) {
-      showPaymentLinkModal({ error: "Link not found or deleted" } as any);
-      return;
-    }
-    if (data.expiresAt && Date.now() > data.expiresAt) {
-      showPaymentLinkModal({ error: "This payment link has expired" } as any);
-      return;
-    }
-    showPaymentLinkModal({ ...data, linkId });
-  } catch (e: any) {
-    showPaymentLinkModal({ error: e?.message ?? "Failed to load link" } as any);
-  }
-}
-(window as any).checkPaymentLinkParam = checkPaymentLinkParam;
-
-/** Hiển thị modal thông tin payment link (full screen đẹp) */
-// Lưu payload tạm thời — tránh inline JSON trong onclick gây lỗi parse
-let _pendingPayLinkData: { to: string; amount: string; token: string; msg: string } | null = null;
-
-function showPaymentLinkModal(data: Record<string, any>): void {
-  let overlay = document.getElementById("pay-link-overlay");
-  if (!overlay) {
-    overlay = document.createElement("div");
-    overlay.id = "pay-link-overlay";
-    overlay.style.cssText = "position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.85);backdrop-filter:blur(6px)";
-    document.body.appendChild(overlay);
-  }
-
-  if (data.loading) {
-    overlay.innerHTML = `<div style="color:#fff;text-align:center"><div style="font-size:32px;margin-bottom:12px">⏳</div><div class="text-sm">Loading payment info…</div></div>`;
-    return;
-  }
-
-  if (data.error) {
-    overlay.innerHTML = `
-      <div style="background:var(--card);border-radius:20px;padding:32px 24px;max-width:360px;width:90%;text-align:center">
-        <div style="font-size:48px;margin-bottom:16px">❌</div>
-        <div class="fw600 mb-8">Link Unavailable</div>
-        <div class="text-sm text-muted mb-20">${sanitize(data.error)}</div>
-        <button class="btn btn-primary btn-full" id="pay-link-close-err">Go to App</button>
-      </div>`;
-    document.getElementById("pay-link-close-err")?.addEventListener("click", () => {
-      overlay!.remove();
-      history.replaceState(null, "", location.pathname);
-    });
-    return;
-  }
-
-  const expiryStr = data.expiresAt
-    ? `Expires ${new Date(data.expiresAt).toLocaleString()}`
-    : "No expiry";
-  const amountDisplay = data.amount
-    ? `${sanitize(String(data.amount))} ${sanitize(data.token ?? "USDC")}`
-    : "Any amount";
-  const qrTarget = `${location.origin}${location.pathname}?pay=${sanitize(data.linkId ?? "")}`;
-
-  // Lưu payload vào biến — không nhúng JSON vào onclick
-  _pendingPayLinkData = {
-    to:     String(data.to ?? ""),
-    amount: String(data.amount ?? ""),
-    token:  String(data.token ?? "USDC"),
-    msg:    String(data.msg ?? ""),
-  };
-
-  overlay.innerHTML = `
-    <div style="background:var(--card);border-radius:20px;padding:28px 24px;max-width:380px;width:92%;box-shadow:0 20px 60px rgba(0,0,0,0.4)">
-      <div style="text-align:center;margin-bottom:20px">
-        <div style="font-size:40px;margin-bottom:8px">💸</div>
-        <div style="font-size:20px;font-weight:700;color:var(--primary)">Payment Request</div>
-        <div class="text-xs text-muted mt-4">⏱ ${sanitize(expiryStr)}</div>
-      </div>
-      <div style="background:var(--bg);border-radius:12px;padding:16px;margin-bottom:16px">
-        <div class="text-xs text-muted mb-4">To</div>
-        <div class="mono fw600" style="font-size:13px;word-break:break-all">${sanitize(data.to ?? "")}</div>
-      </div>
-      <div style="background:var(--bg);border-radius:12px;padding:16px;margin-bottom:16px;text-align:center">
-        <div class="text-xs text-muted mb-4">Amount</div>
-        <div style="font-size:28px;font-weight:700;color:var(--primary)">${amountDisplay}</div>
-      </div>
-      ${data.msg ? `<div style="background:var(--bg);border-radius:12px;padding:16px;margin-bottom:16px"><div class="text-xs text-muted mb-4">Note</div><div class="text-sm">${sanitize(String(data.msg))}</div></div>` : ""}
-      <div id="pay-link-qr" style="text-align:center;margin-bottom:16px"></div>
-      <button class="btn btn-primary btn-full mb-8" id="pay-link-pay-btn" style="font-size:15px;padding:14px">💸 Pay Now</button>
-      <button class="btn btn-full" id="pay-link-cancel-btn" style="background:transparent;border:1px solid var(--border);font-size:13px">Cancel</button>
-    </div>`;
-
-  // Bind nút qua addEventListener — không inline JSON
-  document.getElementById("pay-link-pay-btn")?.addEventListener("click", () => {
-    overlay!.remove();
-    history.replaceState(null, "", location.pathname);
-    if (_pendingPayLinkData) {
-      const payload = { ..._pendingPayLinkData };
-      _pendingPayLinkData = null;
-      prefillAndSend(payload);
-    }
-  });
-
-  document.getElementById("pay-link-cancel-btn")?.addEventListener("click", () => {
-    overlay!.remove();
-    history.replaceState(null, "", location.pathname);
-    _pendingPayLinkData = null;
-  });
-
-  // Render QR
-  const qrDiv = document.getElementById("pay-link-qr");
-  if (qrDiv) {
-    QRCode.toString(qrTarget, { type: "svg", width: 100 }, (err, svg) => {
-      if (!err && qrDiv)
-        qrDiv.innerHTML = `<div style="background:#fff;padding:8px;border-radius:10px;display:inline-block">${svg}</div>`;
-    });
-  }
-}
-(window as any).showPaymentLinkModal = showPaymentLinkModal;
-
-function prefillAndSendFromLink(data: { to: string; amount: string; token: string; msg: string }): void {
-  document.getElementById("pay-link-overlay")?.remove();
-  history.replaceState(null, "", location.pathname);
-  prefillAndSend(data);
-}
-(window as any).prefillAndSendFromLink = prefillAndSendFromLink;
 
 // ── Scheduled Payments ─────────────────────────────────────
 async function doAddSchedule() {
@@ -1766,9 +1547,9 @@ if (!date || selectedTs < tomorrowTs) {
 }
 
   // Approve relayer address để server có thể transferFrom khi đến hạn
-  const RELAYER_ADDRESS = import.meta.env.VITE_RELAYER_ADDRESS as string;
+  const RELAYER_ADDRESS = await getRelayerAddress();
   if (!RELAYER_ADDRESS) {
-    toast("error", "Relayer not configured"); return;
+    toast("error", "Relayer not configured — check server"); return;
   }
   try {
     if (!state.signer) {
@@ -3236,16 +3017,17 @@ function closeModal(): void {
 (window as any).closeModal = closeModal;
 
 // ── Deep Link ──────────────────────────────────────────────
-function checkDeepLink(): void {
+async function checkDeepLink() {
   const p = new URLSearchParams(window.location.search);
 
-  // ?pay=<linkId> → short payment link (Firebase lookup)
-  if (p.get("pay")) {
-    checkPaymentLinkParam();
+  // Short link: ?pay=shortId → query Firebase
+  const payId = p.get("pay");
+  if (payId) {
+    await handlePayLink(payId);
     return;
   }
 
-  // ?to=<address> → legacy direct payment link
+  // Legacy long link: ?to=0x...
   if (!p.get("to")) return;
   nav("send");
   const toEl     = document.getElementById("send-to")     as HTMLInputElement | null;
@@ -3261,6 +3043,117 @@ function checkDeepLink(): void {
   });
 }
 (window as any).checkDeepLink = checkDeepLink;
+
+/** Xử lý ?pay=shortId — query Firebase, hiện popup thông tin, cho thanh toán */
+async function handlePayLink(shortId: string) {
+  // Loading
+  Swal.fire({
+    title: "Loading payment...",
+    showConfirmButton: false,
+    allowOutsideClick: false,
+    background: "#161923",
+    color: "#eef0ff",
+    didOpen: () => Swal.showLoading(),
+  });
+
+  try {
+    const snap = await getDoc(doc(db, "paymentLinks", shortId));
+    if (!snap.exists()) {
+      Swal.fire({
+        icon: "error", title: "Link not found",
+        text: "This payment link does not exist or has been deleted.",
+        background: "#161923", color: "#eef0ff", confirmButtonColor: "#6c63ff",
+      });
+      return;
+    }
+
+    const link = snap.data();
+
+    // Check expiry
+    if (link.expiresAt && Date.now() > link.expiresAt) {
+      Swal.fire({
+        icon: "warning", title: "Link Expired",
+        html: `<div style="color:#aaa;font-size:13px">This payment link expired on <strong style="color:#fff">${fmtDate(link.expiresAt)}</strong></div>`,
+        background: "#161923", color: "#eef0ff", confirmButtonColor: "#6c63ff",
+      });
+      return;
+    }
+
+    // Check active
+    if (!link.active) {
+      Swal.fire({
+        icon: "info", title: "Link Inactive",
+        text: "This payment link has been deactivated by the owner.",
+        background: "#161923", color: "#eef0ff", confirmButtonColor: "#6c63ff",
+      });
+      return;
+    }
+
+    Swal.close();
+
+    // Hiện popup thông tin payment đẹp
+    const result = await Swal.fire({
+      title: "💸 Payment Request",
+      html: `
+        <div style="text-align:left;font-size:14px;line-height:2;color:#ccc">
+          <div style="margin-bottom:12px;padding:12px;background:#1e2235;border-radius:10px;border:1px solid #2e3454">
+            <div class="text-xs" style="color:#888;font-size:11px;margin-bottom:4px">RECIPIENT</div>
+            <div style="font-family:monospace;font-size:12px;color:#a0a8d0;word-break:break-all">${sanitize(link.to)}</div>
+          </div>
+          <div style="display:flex;gap:10px;margin-bottom:12px">
+            <div style="flex:1;padding:12px;background:#1e2235;border-radius:10px;border:1px solid #2e3454;text-align:center">
+              <div style="font-size:11px;color:#888;margin-bottom:4px">AMOUNT</div>
+              <div style="font-size:20px;font-weight:700;color:#fff;font-family:monospace">
+                ${link.amount ? sanitize(link.amount) : "—"}
+              </div>
+              <div style="font-size:12px;color:#7c83a8">${sanitize(link.token ?? "USDC")}</div>
+            </div>
+          </div>
+          ${link.msg ? `<div style="padding:10px 12px;background:#1e2235;border-radius:10px;border:1px solid #2e3454;margin-bottom:12px">
+            <div style="font-size:11px;color:#888;margin-bottom:4px">NOTE</div>
+            <div style="color:#eef0ff">${sanitize(link.msg)}</div>
+          </div>` : ""}
+          ${link.expiresAt ? `<div style="font-size:11px;color:#ffb547;text-align:center">⏰ Expires ${fmtDate(link.expiresAt)}</div>` : ""}
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonText: link.amount ? `Pay ${sanitize(link.amount)} ${sanitize(link.token ?? "USDC")}` : "Pay Now",
+      cancelButtonText: "Cancel",
+      confirmButtonColor: "#6c63ff",
+      cancelButtonColor: "#444",
+      background: "#161923",
+      color: "#eef0ff",
+      allowOutsideClick: false,
+    });
+
+    if (!result.isConfirmed) return;
+
+    // Điền vào form Send và chuyển sang trang Send
+    nav("send");
+    const toEl     = document.getElementById("send-to")     as HTMLInputElement | null;
+    const amountEl = document.getElementById("send-amount") as HTMLInputElement | null;
+    const msgEl    = document.getElementById("send-msg")    as HTMLInputElement | null;
+    if (toEl)     toEl.value     = link.to ?? "";
+    if (amountEl) amountEl.value = link.amount ?? "";
+    if (msgEl)    msgEl.value    = link.msg ?? "";
+
+    const token = link.token ?? "USDC";
+    document.querySelectorAll("#send-token-tabs .token-tab").forEach((t) => {
+      const tab = t as HTMLElement;
+      tab.classList.toggle("active", tab.dataset.token === token);
+    });
+
+    // Clean URL
+    window.history.replaceState({}, "", window.location.pathname);
+  } catch (e: any) {
+    Swal.fire({
+      icon: "error", title: "Error",
+      text: e?.message ?? "Failed to load payment link",
+      background: "#161923", color: "#eef0ff", confirmButtonColor: "#6c63ff",
+    });
+  }
+}
+(window as any).handlePayLink = handlePayLink;
 
 // ── Init — Fix #13: wait for DOMContentLoaded ──────────────
 function initApp() {
