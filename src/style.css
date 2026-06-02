@@ -980,9 +980,7 @@ body::before{
 
 /* ── 1. Card shimmer on hover ─────────────────────────────
    Adds a diagonal light sweep across cards & stat-cards    */
-.card,.stat-card,.contact-card,.schedule-item,.export-row,.notif-item{
-  isolation:isolate;
-}
+/* ── 1. Card shimmer on hover */
 .card::after,.stat-card::after{
   content:'';
   position:absolute;
@@ -996,17 +994,17 @@ body::before{
     transparent 100%
   );
   transform:translateX(-100%) skewX(-15deg);
-  transition:transform 0s;
+  transition:none;
+  visibility:hidden;
   pointer-events:none;
   border-radius:inherit;
   z-index:2;
 }
-/* override the ::after used for orb on stat-card — shimmer goes on a pseudo-wrapper instead */
 .stat-card::after{
-  /* keep existing orb but clip shimmer above */
   mix-blend-mode:screen;
 }
-.card:hover::after{
+.card:hover::after,.stat-card:hover::after{
+  visibility:visible;
   transform:translateX(200%) skewX(-15deg);
   transition:transform 0.65s cubic-bezier(0.4,0,0.2,1);
 }
