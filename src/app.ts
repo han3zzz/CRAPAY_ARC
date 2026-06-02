@@ -1481,7 +1481,7 @@ function renderLinks() {
         <span class="link-text truncate" style="font-size:11px">${displayUrl}</span>
         <button class="copy-btn" data-copy="${displayUrl}" onclick="copyVal(this.dataset.copy)">Copy</button>
       </div>
-      ${expired ? "" : `<button class="btn btn-danger btn-sm w-full mt-8" onclick="deletePaymentLink('${sanitize(String(l.id))}')">🗑 Delete</button>`}
+      <button class="btn btn-danger btn-sm w-full mt-8" onclick="deletePaymentLink('${sanitize(String(l.id))}')">🗑 Delete</button>
     </div>`;
   }).join("");
 }
