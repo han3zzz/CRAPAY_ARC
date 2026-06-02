@@ -980,34 +980,38 @@ body::before{
 
 /* ── 1. Card shimmer on hover ─────────────────────────────
    Adds a diagonal light sweep across cards & stat-cards    */
-/* ── 1. Card shimmer on hover ─────────────────────────────*/
+/* ── 1. Card shimmer on hover */
 .card,.stat-card,.contact-card,.schedule-item,.export-row,.notif-item{
   isolation:isolate;
 }
-.card{overflow:hidden}
 
+/* Chỉ .card mới có shimmer — stat-card::after đã dùng cho orb rồi */
+.card{overflow:hidden}
 .card::after{
   content:'';
   position:absolute;
   top:0;left:0;
-  width:60%;height:100%;
+  width:55%;height:100%;
   background:linear-gradient(
     115deg,
-    transparent 0%,
-    rgba(255,255,255,0.45) 50%,
-    transparent 100%
+    transparent 20%,
+    rgba(255,255,255,0.4) 50%,
+    transparent 80%
   );
   transform:translateX(-200%) skewX(-15deg);
   pointer-events:none;
   border-radius:inherit;
   z-index:2;
   visibility:hidden;
+  transition:none;
 }
 .card:hover::after{
   visibility:visible;
-  transform:translateX(350%) skewX(-15deg);
+  transform:translateX(400%) skewX(-15deg);
   transition:transform 0.7s cubic-bezier(0.4,0,0.2,1);
 }
+
+/* stat-card KHÔNG có shimmer — giữ nguyên orb từ phần gốc */
 
 /* ── 2. Button ripple effect ──────────────────────────────
    CSS-only ripple using ::after radial expand             */
