@@ -1248,7 +1248,7 @@ function generateQR() {
     },
   );
 
-  const base = window.location.href.split("?")[0];
+  const base = "https://app.crapay.xyz";
   const link = `${base}?to=${encodeURIComponent(addr)}&amount=${encodeURIComponent(amount)}&token=${encodeURIComponent(token)}&msg=${encodeURIComponent(msg)}`;
   const linkBox = document.getElementById("qr-link-box");
   const linkText = document.getElementById("qr-link-text");
@@ -1402,21 +1402,7 @@ function prefillAndSend(data: any): void {
 (window as any).prefillAndSend = prefillAndSend;
 
 // ── Payment Links ──────────────────────────────────────────
-function updateLinkPreview() {
-  const el = document.getElementById("gen-link");
-  if (!el) return;
-  if (!state.address) {
-    el.textContent = "Connect wallet first";
-    return;
-  }
-  // Chỉ hiện preview placeholder — short link thật tạo sau khi Save
-  const amount = (document.getElementById("link-amount") as HTMLInputElement)?.value ?? "";
-  const token  = getActiveToken("link-token-tabs") ?? "USDC";
-  const base   = window.location.origin + window.location.pathname;
-  el.textContent = amount
-    ? `${base}?pay=[id] — ${amount} ${token}`
-    : `${base}?pay=[id] — Any amount`;
-}
+function updateLinkPreview() { /* preview removed */ }
 (window as any).updateLinkPreview = updateLinkPreview;
 
 async function savePaymentLink() {
@@ -1429,7 +1415,7 @@ async function savePaymentLink() {
 
   // Tạo short ID 8 ký tự
   const shortId = Math.random().toString(36).slice(2, 10);
-  const base    = window.location.origin + window.location.pathname;
+  const base    = "https://app.crapay.xyz";
   const shortUrl = `${base}?pay=${shortId}`;
 
   const link = {
