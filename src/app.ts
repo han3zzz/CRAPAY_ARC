@@ -3030,116 +3030,291 @@ async function checkDeepLink() {
 }
 (window as any).checkDeepLink = checkDeepLink;
 
-/** Xử lý ?pay=shortId — query Firebase, hiện popup thông tin, cho thanh toán */
+/** Inject CSS cho payment page (chỉ inject 1 lần) */
+function injectPayPageStyles(): void {
+  if (document.getElementById("paypage-styles")) return;
+  const style = document.createElement("style");
+  style.id = "paypage-styles";
+  style.textContent = `
+    #paypage-overlay {
+      position: fixed; inset: 0; z-index: 9999;
+      background: #0b0d14;
+      display: flex; align-items: center; justify-content: center;
+      font-family: -apple-system, 'Inter', sans-serif;
+      animation: ppFadeIn .25s ease;
+    }
+    @keyframes ppFadeIn { from { opacity:0 } to { opacity:1 } }
+    @keyframes ppSlideUp { from { opacity:0; transform:translateY(30px) } to { opacity:1; transform:translateY(0) } }
+    @keyframes ppPulse {
+      0%,100% { box-shadow: 0 0 0 0 rgba(108,99,255,.4); }
+      50%      { box-shadow: 0 0 0 14px rgba(108,99,255,0); }
+    }
+    #paypage-card {
+      width: 100%; max-width: 440px; margin: 0 16px;
+      background: linear-gradient(160deg, #181c2e 0%, #12151f 100%);
+      border: 1px solid rgba(108,99,255,.25);
+      border-radius: 24px;
+      padding: 36px 32px 28px;
+      box-shadow: 0 32px 80px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.04) inset;
+      animation: ppSlideUp .35s cubic-bezier(.16,1,.3,1);
+      position: relative; overflow: hidden;
+    }
+    #paypage-card::before {
+      content:''; position:absolute; top:-80px; left:50%; transform:translateX(-50%);
+      width:300px; height:200px;
+      background: radial-gradient(ellipse, rgba(108,99,255,.18) 0%, transparent 70%);
+      pointer-events:none;
+    }
+    .pp-badge {
+      display:inline-flex; align-items:center; gap:6px;
+      background: rgba(108,99,255,.15); border:1px solid rgba(108,99,255,.3);
+      color:#a99fff; font-size:11px; font-weight:600; letter-spacing:.06em;
+      padding:4px 10px; border-radius:20px; margin-bottom:20px;
+    }
+    .pp-badge-dot {
+      width:6px; height:6px; border-radius:50%; background:#6c63ff;
+      animation: ppPulse 2s infinite;
+    }
+    .pp-avatar {
+      width:52px; height:52px; border-radius:16px;
+      background: linear-gradient(135deg,#6c63ff,#a855f7);
+      display:flex; align-items:center; justify-content:center;
+      font-size:22px; margin-bottom:16px;
+      box-shadow: 0 8px 24px rgba(108,99,255,.4);
+    }
+    .pp-title {
+      font-size:22px; font-weight:700; color:#eef0ff; margin:0 0 4px;
+      letter-spacing:-.01em;
+    }
+    .pp-subtitle { font-size:13px; color:#5a6080; margin:0 0 24px; }
+    .pp-amount-box {
+      background: linear-gradient(135deg, rgba(108,99,255,.12), rgba(168,85,247,.08));
+      border: 1px solid rgba(108,99,255,.3);
+      border-radius:16px; padding:20px; text-align:center; margin-bottom:20px;
+    }
+    .pp-amount-label { font-size:11px; color:#5a6080; font-weight:600; letter-spacing:.08em; margin-bottom:6px; }
+    .pp-amount-value { font-size:38px; font-weight:800; color:#fff; letter-spacing:-.02em; line-height:1; }
+    .pp-amount-token {
+      display:inline-block; margin-left:6px;
+      font-size:16px; font-weight:600; color:#8b83ff; vertical-align:middle;
+    }
+    .pp-info-row {
+      display:flex; flex-direction:column; gap:10px; margin-bottom:20px;
+    }
+    .pp-info-item {
+      background: rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.07);
+      border-radius:12px; padding:12px 14px;
+    }
+    .pp-info-item-label { font-size:10px; color:#4a5078; font-weight:600; letter-spacing:.08em; margin-bottom:4px; }
+    .pp-info-item-value { font-size:13px; color:#c8ccee; word-break:break-all; }
+    .pp-info-item-value.mono { font-family:monospace; font-size:12px; color:#8892b0; }
+    .pp-note-item {
+      background: rgba(255,181,71,.06); border:1px solid rgba(255,181,71,.2);
+      border-radius:12px; padding:12px 14px;
+    }
+    .pp-note-item .pp-info-item-label { color:#d4943a; }
+    .pp-note-item .pp-info-item-value { color:#ffd580; }
+    .pp-expiry-bar {
+      display:flex; align-items:center; justify-content:center; gap:6px;
+      font-size:12px; color:#ffb547; margin-bottom:20px;
+      background: rgba(255,181,71,.08); border:1px solid rgba(255,181,71,.2);
+      border-radius:10px; padding:8px 12px;
+    }
+    .pp-btn-pay {
+      width:100%; padding:16px; border:none; border-radius:14px; cursor:pointer;
+      font-size:16px; font-weight:700; color:#fff; letter-spacing:.01em;
+      background: linear-gradient(135deg,#6c63ff,#a855f7);
+      box-shadow: 0 8px 28px rgba(108,99,255,.45);
+      transition: transform .15s, box-shadow .15s, opacity .15s;
+      position:relative; overflow:hidden;
+    }
+    .pp-btn-pay:hover { transform:translateY(-2px); box-shadow:0 12px 36px rgba(108,99,255,.55); }
+    .pp-btn-pay:active { transform:translateY(0); }
+    .pp-btn-pay:disabled { opacity:.6; cursor:not-allowed; transform:none; }
+    .pp-btn-cancel {
+      width:100%; padding:12px; border:1px solid rgba(255,255,255,.08); border-radius:12px;
+      cursor:pointer; font-size:14px; font-weight:500; color:#6a7094;
+      background:transparent; margin-top:10px;
+      transition:color .15s, border-color .15s;
+    }
+    .pp-btn-cancel:hover { color:#aaa; border-color:rgba(255,255,255,.2); }
+    .pp-powered {
+      text-align:center; font-size:11px; color:#2e3354; margin-top:16px; letter-spacing:.04em;
+    }
+    .pp-powered span { color:#4a4e7a; }
+    .pp-status-icon { font-size:48px; margin-bottom:12px; }
+    .pp-status-title { font-size:20px; font-weight:700; color:#eef0ff; margin-bottom:6px; }
+    .pp-status-sub { font-size:13px; color:#5a6080; margin-bottom:24px; }
+  `;
+  document.head.appendChild(style);
+}
+
+/** Tạo overlay payment page và gắn vào body */
+function createPayPageOverlay(): HTMLElement {
+  const el = document.createElement("div");
+  el.id = "paypage-overlay";
+  document.body.appendChild(el);
+  return el;
+}
+
+/** Xóa payment page overlay */
+function removePayPageOverlay(): void {
+  document.getElementById("paypage-overlay")?.remove();
+}
+
+/** Xử lý ?pay=shortId — hiện trang thanh toán đẹp toàn màn hình */
 async function handlePayLink(shortId: string) {
-  // Loading
-  Swal.fire({
-    title: "Loading payment...",
-    showConfirmButton: false,
-    allowOutsideClick: false,
-    background: "#161923",
-    color: "#eef0ff",
-    didOpen: () => Swal.showLoading(),
-  });
+  injectPayPageStyles();
+  const overlay = createPayPageOverlay();
+
+  // Loading state
+  overlay.innerHTML = `
+    <div id="paypage-card">
+      <div class="pp-badge"><span class="pp-badge-dot"></span>CRAPAY</div>
+      <div style="text-align:center;padding:40px 0;color:#3a4060;font-size:14px">
+        <div style="font-size:32px;margin-bottom:16px;animation:ppPulse 1.5s infinite">⏳</div>
+        Loading payment request…
+      </div>
+    </div>`;
 
   try {
     const snap = await getDoc(doc(db, "paymentLinks", shortId));
+
     if (!snap.exists()) {
-      Swal.fire({
-        icon: "error", title: "Link not found",
-        text: "This payment link does not exist or has been deleted.",
-        background: "#161923", color: "#eef0ff", confirmButtonColor: "#6c63ff",
-      });
+      overlay.innerHTML = `
+        <div id="paypage-card">
+          <div style="text-align:center;padding:20px 0">
+            <div class="pp-status-icon">🔍</div>
+            <div class="pp-status-title">Link Not Found</div>
+            <div class="pp-status-sub">This payment link doesn't exist or has been removed.</div>
+            <button class="pp-btn-pay" onclick="removePayPageOverlay()">Go Back</button>
+          </div>
+        </div>`;
       return;
     }
 
     const link = snap.data();
 
-    // Check expiry
     if (link.expiresAt && Date.now() > link.expiresAt) {
-      Swal.fire({
-        icon: "warning", title: "Link Expired",
-        html: `<div style="color:#aaa;font-size:13px">This payment link expired on <strong style="color:#fff">${fmtDate(link.expiresAt)}</strong></div>`,
-        background: "#161923", color: "#eef0ff", confirmButtonColor: "#6c63ff",
-      });
+      overlay.innerHTML = `
+        <div id="paypage-card">
+          <div style="text-align:center;padding:20px 0">
+            <div class="pp-status-icon">⏰</div>
+            <div class="pp-status-title">Link Expired</div>
+            <div class="pp-status-sub">This payment link expired on <strong style="color:#ffd580">${fmtDate(link.expiresAt)}</strong>.</div>
+            <button class="pp-btn-pay" onclick="removePayPageOverlay()">Go Back</button>
+          </div>
+        </div>`;
       return;
     }
 
-    // Check active
     if (!link.active) {
-      Swal.fire({
-        icon: "info", title: "Link Inactive",
-        text: "This payment link has been deactivated by the owner.",
-        background: "#161923", color: "#eef0ff", confirmButtonColor: "#6c63ff",
-      });
+      overlay.innerHTML = `
+        <div id="paypage-card">
+          <div style="text-align:center;padding:20px 0">
+            <div class="pp-status-icon">🔒</div>
+            <div class="pp-status-title">Link Inactive</div>
+            <div class="pp-status-sub">This payment link has been deactivated by the owner.</div>
+            <button class="pp-btn-pay" onclick="removePayPageOverlay()">Go Back</button>
+          </div>
+        </div>`;
       return;
     }
 
-    Swal.close();
+    const token   = sanitize(link.token ?? "USDC");
+    const amount  = link.amount ? sanitize(link.amount) : null;
+    const toAddr  = sanitize(link.to ?? "");
+    const noteHtml = link.msg ? `
+      <div class="pp-note-item pp-info-item">
+        <div class="pp-info-item-label">💬 NOTE</div>
+        <div class="pp-info-item-value">${sanitize(link.msg)}</div>
+      </div>` : "";
+    const expiryHtml = link.expiresAt ? `
+      <div class="pp-expiry-bar">⏰ Expires ${fmtDate(link.expiresAt)}</div>` : "";
+    const btnLabel = amount ? `Pay ${amount} ${token}` : "Pay Now";
 
-    // Hiện popup thông tin payment đẹp
-    const result = await Swal.fire({
-      title: "💸 Payment Request",
-      html: `
-        <div style="text-align:left;font-size:14px;line-height:2;color:#ccc">
-          <div style="margin-bottom:12px;padding:12px;background:#1e2235;border-radius:10px;border:1px solid #2e3454">
-            <div class="text-xs" style="color:#888;font-size:11px;margin-bottom:4px">RECIPIENT</div>
-            <div style="font-family:monospace;font-size:12px;color:#a0a8d0;word-break:break-all">${sanitize(link.to)}</div>
+    overlay.innerHTML = `
+      <div id="paypage-card">
+        <div class="pp-badge"><span class="pp-badge-dot"></span>PAYMENT REQUEST</div>
+        <div class="pp-avatar">💸</div>
+        <h2 class="pp-title">You've been sent a<br>payment request</h2>
+        <p class="pp-subtitle">Review the details below and confirm to pay.</p>
+
+        ${amount ? `
+        <div class="pp-amount-box">
+          <div class="pp-amount-label">AMOUNT DUE</div>
+          <div class="pp-amount-value">${amount}<span class="pp-amount-token">${token}</span></div>
+        </div>` : `
+        <div class="pp-amount-box">
+          <div class="pp-amount-label">AMOUNT</div>
+          <div class="pp-amount-value" style="font-size:26px;color:#8b83ff">Open Amount</div>
+        </div>`}
+
+        <div class="pp-info-row">
+          <div class="pp-info-item">
+            <div class="pp-info-item-label">📬 RECIPIENT</div>
+            <div class="pp-info-item-value mono">${toAddr}</div>
           </div>
-          <div style="display:flex;gap:10px;margin-bottom:12px">
-            <div style="flex:1;padding:12px;background:#1e2235;border-radius:10px;border:1px solid #2e3454;text-align:center">
-              <div style="font-size:11px;color:#888;margin-bottom:4px">AMOUNT</div>
-              <div style="font-size:20px;font-weight:700;color:#fff;font-family:monospace">
-                ${link.amount ? sanitize(link.amount) : "—"}
-              </div>
-              <div style="font-size:12px;color:#7c83a8">${sanitize(link.token ?? "USDC")}</div>
-            </div>
+          <div class="pp-info-item">
+            <div class="pp-info-item-label">🔗 NETWORK</div>
+            <div class="pp-info-item-value">Arc Testnet</div>
           </div>
-          ${link.msg ? `<div style="padding:10px 12px;background:#1e2235;border-radius:10px;border:1px solid #2e3454;margin-bottom:12px">
-            <div style="font-size:11px;color:#888;margin-bottom:4px">NOTE</div>
-            <div style="color:#eef0ff">${sanitize(link.msg)}</div>
-          </div>` : ""}
-          ${link.expiresAt ? `<div style="font-size:11px;color:#ffb547;text-align:center">⏰ Expires ${fmtDate(link.expiresAt)}</div>` : ""}
+          ${noteHtml}
         </div>
-      `,
-      showCancelButton: true,
-      confirmButtonText: link.amount ? `Pay ${sanitize(link.amount)} ${sanitize(link.token ?? "USDC")}` : "Pay Now",
-      cancelButtonText: "Cancel",
-      confirmButtonColor: "#6c63ff",
-      cancelButtonColor: "#444",
-      background: "#161923",
-      color: "#eef0ff",
-      allowOutsideClick: false,
-    });
 
-    if (!result.isConfirmed) return;
+        ${expiryHtml}
 
-    // Điền vào form Send và chuyển sang trang Send
-    nav("send");
-    const toEl     = document.getElementById("send-to")     as HTMLInputElement | null;
-    const amountEl = document.getElementById("send-amount") as HTMLInputElement | null;
-    const msgEl    = document.getElementById("send-msg")    as HTMLInputElement | null;
-    if (toEl)     toEl.value     = link.to ?? "";
-    if (amountEl) amountEl.value = link.amount ?? "";
-    if (msgEl)    msgEl.value    = link.msg ?? "";
+        <button class="pp-btn-pay" id="paypage-confirm-btn" onclick="_payPageConfirm()">
+          ✦ ${btnLabel}
+        </button>
+        <button class="pp-btn-cancel" onclick="removePayPageOverlay()">Cancel</button>
+        <div class="pp-powered">Secured by <span>CRAPAY</span> · Arc Testnet</div>
+      </div>`;
 
-    const token = link.token ?? "USDC";
-    document.querySelectorAll("#send-token-tabs .token-tab").forEach((t) => {
-      const tab = t as HTMLElement;
-      tab.classList.toggle("active", tab.dataset.token === token);
-    });
+    // Store link data for the confirm handler
+    (window as any)._payPageLinkData = link;
 
-    // Clean URL
-    window.history.replaceState({}, "", window.location.pathname);
   } catch (e: any) {
-    Swal.fire({
-      icon: "error", title: "Error",
-      text: e?.message ?? "Failed to load payment link",
-      background: "#161923", color: "#eef0ff", confirmButtonColor: "#6c63ff",
-    });
+    overlay.innerHTML = `
+      <div id="paypage-card">
+        <div style="text-align:center;padding:20px 0">
+          <div class="pp-status-icon">⚠️</div>
+          <div class="pp-status-title">Something went wrong</div>
+          <div class="pp-status-sub">${sanitize(e?.message ?? "Failed to load payment link")}</div>
+          <button class="pp-btn-pay" onclick="removePayPageOverlay()">Go Back</button>
+        </div>
+      </div>`;
   }
 }
 (window as any).handlePayLink = handlePayLink;
+(window as any).removePayPageOverlay = removePayPageOverlay;
+
+/** Confirm handler khi nhấn nút Pay trên payment page */
+function _payPageConfirm(): void {
+  const link = (window as any)._payPageLinkData;
+  if (!link) return;
+
+  removePayPageOverlay();
+
+  // Điền vào form Send và chuyển sang trang Send
+  nav("send");
+  const toEl     = document.getElementById("send-to")     as HTMLInputElement | null;
+  const amountEl = document.getElementById("send-amount") as HTMLInputElement | null;
+  const msgEl    = document.getElementById("send-msg")    as HTMLInputElement | null;
+  if (toEl)     toEl.value     = link.to ?? "";
+  if (amountEl) amountEl.value = link.amount ?? "";
+  if (msgEl)    msgEl.value    = link.msg ?? "";
+
+  const token = link.token ?? "USDC";
+  document.querySelectorAll("#send-token-tabs .token-tab").forEach((t) => {
+    const tab = t as HTMLElement;
+    tab.classList.toggle("active", tab.dataset.token === token);
+  });
+
+  // Clean URL
+  window.history.replaceState({}, "", window.location.pathname);
+}
+(window as any)._payPageConfirm = _payPageConfirm;
 
 // ── Init — Fix #13: wait for DOMContentLoaded ──────────────
 function initApp() {
