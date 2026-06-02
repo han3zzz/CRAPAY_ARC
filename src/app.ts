@@ -272,7 +272,6 @@ async function fbSave(sub: string, item: any): Promise<void> {
   const id = String(item.id ?? item._fbId ?? Date.now());
   const { _fbId, ...rest } = item;
   const ref = userDocRef(sub, id);
-  console.log("[fbSave] path:", ref.path, "data:", { ...rest, ownerAddress: state.address.toLowerCase() });
   try {
     await setDoc(
       ref,
@@ -283,7 +282,6 @@ async function fbSave(sub: string, item: any): Promise<void> {
       },
       { merge: true },
     );
-    console.log("[fbSave] ✅ saved:", ref.path);
   } catch (e: any) {
     console.error("[fbSave] ❌ error:", e?.code, e?.message);
     throw e;
@@ -1535,8 +1533,6 @@ async function doAddSchedule() {
     (document.getElementById("sched-date") as HTMLInputElement)?.value ?? "";
   const token = getActiveToken("sched-token-tabs") ?? "USDC";
 
-  console.log("[doAddSchedule] to:", to, "amount:", amount, "date:", date);
-
   if (!ethers.isAddress(to)) {
     toast("error", "Invalid recipient address");
     return;
@@ -1552,7 +1548,6 @@ async function doAddSchedule() {
 
   // Approve relayer address để server có thể transferFrom khi đến hạn
   const RELAYER_ADDRESS = await getRelayerAddress();
-  console.log("[doAddSchedule] relayerAddress:", RELAYER_ADDRESS);
   if (!RELAYER_ADDRESS) {
     toast("error", "Relayer not configured — check server"); return;
   }
@@ -1580,7 +1575,6 @@ async function doAddSchedule() {
     createdAt: Date.now(),
     ownerAddress: state.address!.toLowerCase(),
   };
-  console.log("[doAddSchedule] saving sched:", sched);
   await fbSave("schedules", sched);
   state.schedules.unshift(sched);
   renderSchedules();
