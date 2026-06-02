@@ -1535,7 +1535,8 @@ async function doAddSchedule() {
     (document.getElementById("sched-date") as HTMLInputElement)?.value ?? "";
   const token = getActiveToken("sched-token-tabs") ?? "USDC";
 
-  // Fix #2: validate address
+  console.log("[doAddSchedule] to:", to, "amount:", amount, "date:", date);
+
   if (!ethers.isAddress(to)) {
     toast("error", "Invalid recipient address");
     return;
@@ -1544,21 +1545,14 @@ async function doAddSchedule() {
     toast("error", "Enter a valid amount");
     return;
   }
-
-
-const tomorrow = new Date();
-tomorrow.setDate(tomorrow.getDate() + 1);
-tomorrow.setHours(0, 0, 0, 0);
-const tomorrowTs = tomorrow.getTime();
-
-const selectedTs = date ? new Date(date).getTime() : 0;
-if (!date || selectedTs < tomorrowTs) {
-  toast("error", "Start date must be at least tomorrow");
-  return;
-}
+  if (!date) {
+    toast("error", "Please select a start date");
+    return;
+  }
 
   // Approve relayer address để server có thể transferFrom khi đến hạn
   const RELAYER_ADDRESS = await getRelayerAddress();
+  console.log("[doAddSchedule] relayerAddress:", RELAYER_ADDRESS);
   if (!RELAYER_ADDRESS) {
     toast("error", "Relayer not configured — check server"); return;
   }
@@ -1573,8 +1567,7 @@ if (!date || selectedTs < tomorrowTs) {
     return;
   }
 
-
-const startTs = date ? new Date(date).getTime() : tomorrow.getTime();
+  const startTs = new Date(date).getTime();
   const sched = {
     id: Date.now(),
     to,
@@ -1585,7 +1578,9 @@ const startTs = date ? new Date(date).getTime() : tomorrow.getTime();
     nextRunAt: startTs,
     active: true,
     createdAt: Date.now(),
+    ownerAddress: state.address!.toLowerCase(),
   };
+  console.log("[doAddSchedule] saving sched:", sched);
   await fbSave("schedules", sched);
   state.schedules.unshift(sched);
   renderSchedules();
