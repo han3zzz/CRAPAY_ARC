@@ -3160,6 +3160,11 @@ function createPayPageOverlay(): HTMLElement {
 /** Xóa payment page overlay */
 function removePayPageOverlay(): void {
   document.getElementById("paypage-overlay")?.remove();
+
+  const url = new URL(window.location.href);
+  url.searchParams.delete("pay");
+
+  history.replaceState({}, "", url.toString());
 }
 
 /** Xử lý ?pay=shortId — hiện trang thanh toán đẹp toàn màn hình */
