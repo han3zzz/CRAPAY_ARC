@@ -980,33 +980,33 @@ body::before{
 
 /* ── 1. Card shimmer on hover ─────────────────────────────
    Adds a diagonal light sweep across cards & stat-cards    */
-/* ── 1. Card shimmer on hover */
-.card::after,.stat-card::after{
+/* ── 1. Card shimmer on hover ─────────────────────────────*/
+.card,.stat-card,.contact-card,.schedule-item,.export-row,.notif-item{
+  isolation:isolate;
+}
+.card{overflow:hidden}
+
+.card::after{
   content:'';
   position:absolute;
-  inset:0;
+  top:0;left:0;
+  width:60%;height:100%;
   background:linear-gradient(
     115deg,
     transparent 0%,
-    transparent 40%,
-    rgba(255,255,255,0.55) 50%,
-    transparent 60%,
+    rgba(255,255,255,0.45) 50%,
     transparent 100%
   );
-  transform:translateX(-100%) skewX(-15deg);
-  transition:none;
-  visibility:hidden;
+  transform:translateX(-200%) skewX(-15deg);
   pointer-events:none;
   border-radius:inherit;
   z-index:2;
+  visibility:hidden;
 }
-.stat-card::after{
-  mix-blend-mode:screen;
-}
-.card:hover::after,.stat-card:hover::after{
+.card:hover::after{
   visibility:visible;
-  transform:translateX(200%) skewX(-15deg);
-  transition:transform 0.65s cubic-bezier(0.4,0,0.2,1);
+  transform:translateX(350%) skewX(-15deg);
+  transition:transform 0.7s cubic-bezier(0.4,0,0.2,1);
 }
 
 /* ── 2. Button ripple effect ──────────────────────────────
